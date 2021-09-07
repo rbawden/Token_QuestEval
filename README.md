@@ -2,6 +2,7 @@
 Token QuestEval is a modification of QuestEval  (license and release details below.)
 ![GitHub](https://img.shields.io/github/license/ThomasScialom/QuestEval)
 ![release](https://img.shields.io/github/v/release/ThomasScialom/QuestEval)
+
 Instead of using noun chunks from a text passage as ground-truth answers from which questions are generated, each token of the passage is used as a ground-truth answer, and the corresponding question is the original text passage with the token masked by a special token <mask>. 
 
 ## Overview 
