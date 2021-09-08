@@ -1,10 +1,10 @@
 import logging
-from simpletransformers.ner import NERModel, NERArgs
 import csv
 import json
 import spacy
 from spacy.cli import download
 import random
+from datasets import load_dataset
 
 def get_qas(list_sentences):
     SEP = ' '
@@ -21,9 +21,6 @@ def get_qas(list_sentences):
     return qas
 
 def split_on_punct(doc):
-    """
-    From one spacy doc to a List of (sentence_text, (start, end))
-    """
     start = 0
     seen_period = False
     start_idx = 0
@@ -46,20 +43,19 @@ def sentencize(
     return [sentence_tuple[0] for sentence_tuple in split_on_punct(preprocessed_context)]
 
 def main():
-    print("get the sentence splitter")
+    # get the sentence splitter
     download('en_core_web_sm')
     spacy_pipeline = spacy.load('en_core_web_sm')
 
-    print("get the CNN dataset")
-    from datasets import load_dataset
+    #get the dataset
     dataset = load_dataset('cnn_dailymail', '3.0.0')
     train_dataset = dataset['validation']
 
     MAX = 5000
     counter = 0
     
-    print("writing new dataset")
-    with open("EVAL_cnn_token_ctx_article.jsonl", mode='w', encoding='utf-8') as outfile:
+    #writing new dataset
+    with open("cnn_token_ctx_article.jsonl", mode='w', encoding='utf-8') as outfile:
         for e in train_dataset:
             counter = counter + 1
             highlights = e['highlights']
