@@ -7,7 +7,7 @@ Instead of using noun chunks from a text passage as ground-truth answers from wh
 
 ## Overview 
 This repo contains the codes to perform the following tasks:
-1. Create training dataset to train the QA model.
+1. Create dataset to train and evaluate the QA model.
 2. Train the QA model (finetune a T5 model) with the training dataset from step 1.
 3. Evaluate summaries using the trained QA model (Token QuestEval)
 4. Compute the correlation scores of summary evaluation.
@@ -59,3 +59,7 @@ The usage of Token QuestEval is identical to that of QuestEval, with the followi
 -  `self.filter_answ` if set to true, will only include QA pairs where the ground-truth answers are NOT one of the stopwords listed in `self.stopwords`. There four attributes can be found on lines [lines 53-57](https://github.com/YuLuLiu/Token_QuestEval/blob/main/questeval/token_questeval.py#L53) 
 
 **Don't forget to change the spacy pipeline if you want to work in another language than English**
+  
+## 4/ Computing Correlation Scores [run_all.py](https://github.com/YuLuLiu/Token_QuestEval/blob/main/run_all.py) 
+No change has been made to the computation of correlation scores. For example, for CNN-Dailymail, run: `python run_all.py --dataset SummarizationCNNDM`.
+**Don't forget to unpack the data as detailed [run_all.py](https://github.com/ThomasScialom/BEAMetrics)**
