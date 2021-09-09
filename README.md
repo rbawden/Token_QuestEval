@@ -45,7 +45,7 @@ e.g.:
 ```
 ##### Quick changes to be made:
 - Output dataset size: [line 70](https://github.com/YuLuLiu/Token_QuestEval/blob/main/create_QA_dataset.py#L70)
-- Output dataset name: [line 74](https://github.com/YuLuLiu/Token_QuestEval/blob/main/create_QA_dataset.py#L74)
+- Output dataset path: [line 74](https://github.com/YuLuLiu/Token_QuestEval/blob/main/create_QA_dataset.py#L74), the `QA_data` is an empty folder that can be used to store it.
 
 ## 2/ Training QA Model: [train_t5.py](https://github.com/YuLuLiu/Token_QuestEval/blob/main/train_t5.py)
 The code uses a modified version of [simpletransformers](https://github.com/ThilinaRajapakse/simpletransformers). The modifications tailor the data processing step to the dataset we created above. There should only be small changes to make to the code:
