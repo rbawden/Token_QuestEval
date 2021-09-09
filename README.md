@@ -51,3 +51,11 @@ e.g.:
 The code uses a modified version of [simpletransformers](https://github.com/ThilinaRajapakse/simpletransformers). The modifications tailor the data processing step to the dataset we created above. There should only be small changes to make to the code:
 - Change the path to the dataset, and the proportion of train-eval split on [lines 21-26](https://github.com/YuLuLiu/Token_QuestEval/blob/main/train_t5.py#L21) 
 - Change T5 Model training configurations as need on [lines 32-43](https://github.com/YuLuLiu/Token_QuestEval/blob/main/train_t5.py#L32), the possible options are presented in [simpletransformers documentation](https://simpletransformers.ai/docs/usage/)
+
+## 3/ Token QuestEval: [/questeval/token_questeval.py](https://github.com/YuLuLiu/Token_QuestEval/blob/main/questeval/token_questeval.py) 
+The usage of Token QuestEval is identical to that of QuestEval, with the following points to consider:
+-  `list_scores` can take a Tuple, combination of `f1`, `answerability` or `bartscore`, `bartscore` here measures the loss of the QA model given context, question and the ground-truth answer. Its implementation can be found [here](https://github.com/YuLuLiu/Token_QuestEval/blob/main/questeval/utils.py#L126) 
+-  `self.filter_pos` if set to true, will only include QA pairs where the ground-truth answers are marked to be the wanted POS tag listed in  `self.wanted_pos`. 
+-  `self.filter_answ` if set to true, will only include QA pairs where the ground-truth answers are NOT one of the stopwords listed in `self.stopwords`. There four attributes can be found on lines [lines 53-57](https://github.com/YuLuLiu/Token_QuestEval/blob/main/questeval/token_questeval.py#L53) 
+
+**Don't forget to change the spacy pipeline if you want to work in another language than English**
