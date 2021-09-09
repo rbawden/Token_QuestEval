@@ -6,16 +6,32 @@ from spacy.cli import download
 import random
 from datasets import load_dataset
 
+
 def get_qas(list_sentences):
     SEP = ' '
+    PADDING_SIZE = 24
     qas = []
-    for text in list_sentences:
-        tokens = text.split()
+
+    tokenized_sentences = [sentence.split() for sentence in list_sentences]
+
+    for i in range(len(tokenized_sentences)):
+        tokens = tokenized_sentences[i]
         index = random.randint(0, len(tokens) - 1)
         asw_token = tokens[index]
         mask_text = SEP.join(tokens[:index]) + ' <mask> ' + ' '.join(tokens[index + 1:])
 
-        QA_pair = {'answer': asw_token, 'question': mask_text}
+        question = mask_text
+
+        if PADDING_SIZE > 0:
+            if i - 1 >= 0:
+                left_neighbor = tokenized_sentences[i - 1]
+                question = SEP.join(left_neighbor[-PADDING_SIZE:]) + SEP + question
+
+            if i + 1 < len(tokenized_sentences):
+                right_neighbor = tokenized_sentences[i + 1]
+                question = question + SEP + SEP.join(right_neighbor[:PADDING_SIZE])
+
+        QA_pair = {'answer': asw_token, 'question': question}
         qas.append(QA_pair)
 
     return qas
