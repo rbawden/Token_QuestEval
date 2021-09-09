@@ -46,3 +46,8 @@ e.g.:
 ##### Quick changes to be made:
 - Output dataset size: [line 70](https://github.com/YuLuLiu/Token_QuestEval/blob/main/create_QA_dataset.py#L70)
 - Output dataset name: [line 74](https://github.com/YuLuLiu/Token_QuestEval/blob/main/create_QA_dataset.py#L74)
+
+## 2/ Training QA Model: [train_t5.py](https://github.com/YuLuLiu/Token_QuestEval/blob/main/train_t5.py)
+The code uses a modified version of [simpletransformers](https://github.com/ThilinaRajapakse/simpletransformers). The modifications tailor the data processing step to the dataset we created above. There should only be small changes to make to the code:
+- Change the path to the dataset, and the proportion of train-eval split on [lines 21-26](https://github.com/YuLuLiu/Token_QuestEval/blob/main/train_t5.py#L21) 
+- Change T5 Model training configurations as need on [lines 32-43](https://github.com/YuLuLiu/Token_QuestEval/blob/main/train_t5.py#L32), the possible options are presented in [simpletransformers documentation](https://simpletransformers.ai/docs/usage/)
