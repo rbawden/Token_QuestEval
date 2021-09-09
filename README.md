@@ -27,6 +27,7 @@ pip install -r requirements.txt
 ##### How examples are generated: 
 - **Context Length**: When a string is intended to be used as context, the code currently takes its 5 first sentences. This number can be changed at [line 81](https://github.com/YuLuLiu/Token_QuestEval/blob/main/create_QA_dataset.py#L81).
 - **Masked Question Creation**: When a string is intended to be used to generate masked QA pairs, it is first split into sentences and then split into tokens by whitespace (change splitting strategy if working with languages like Chinese). For each sentence, a random token is chosen to be the answer, and the token is masked in the sentence to create the masked question. This is done in [line 15-23](https://github.com/YuLuLiu/Token_QuestEval/blob/main/create_QA_dataset.py#L15)
+  
 *e.g.: 
 String : "I love eating apples. I hope I can eat at least one every day. They are very delicious."
 Working with sentence 2 : "I hope I can eat at least one every day."
@@ -34,6 +35,7 @@ Selected token / Answer : "eat"
 Masked question : "I hope I can <mask> at least one every day."*
 
 - **Masked Question Padding**: The padding size is set to be 24, it means that we will take 24 tokens from the right and 24 tokens from the left of the masked question, from the original string. This is done in [line 25-32](https://github.com/YuLuLiu/Token_QuestEval/blob/main/create_QA_dataset.py#L25).
+
 *e.g.:
 Padding Size = 2 (for the sake of example)
 String : "I love eating apples. I hope I can eat at least one every day. They are very delicious."
