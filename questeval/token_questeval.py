@@ -25,7 +25,7 @@ class Token_QuestEval(QuestEval):
             task: str = "text2text",
             language: str = "en",
             answer_types: Tuple = ('TOKEN',),
-            list_scores: Tuple = ('f1',),
+            list_scores: Tuple = ('f1', 'bartscore',),
             src_preproc_pipe=None,
             do_weighter: bool = False,
             do_consistency: bool = False,
@@ -52,9 +52,23 @@ class Token_QuestEval(QuestEval):
             use_cache)
         self.sep = "<sep>"
         self.filter_answ = False
-        self.filter_pos = True
+        self.filter_pos = False
+        self.ctx_padding_size = 24
         self.wanted_pos = ["VERB", "NOUN", "PROPN"]
         self.stopwords = ['i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', "you're", "you've", "you'll", "you'd", 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', "she's", 'her', 'hers', 'herself', 'it', "it's", 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'this', 'that', "that'll", 'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'a', 'an', 'the', 'and', 'but', 'if', 'or', 'because', 'as', 'until', 'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', "don't", 'should', "should've", 'now', 'd', 'll', 'm', 'o', 're', 've', 'y', 'ain', 'aren', "aren't", 'couldn', "couldn't", 'didn', "didn't", 'doesn', "doesn't", 'hadn', "hadn't", 'hasn', "hasn't", 'haven', "haven't", 'isn', "isn't", 'ma', 'mightn', "mightn't", 'mustn', "mustn't", 'needn', "needn't", 'shan', "shan't", 'shouldn', "shouldn't", 'wasn', "wasn't", 'weren', "weren't", 'won', "won't", 'wouldn', "wouldn't"]
+
+    def _predict_answers(
+        self,
+        to_do_exs: List[tuple],
+        type_logs: str
+    ) -> Tuple[List[float], List[str]]:
+        model_QA = self.models[type_logs]['QA']
+        formated_inputs = [f'{question} {self.sep} {context}' for question, context, _ in to_do_exs]
+        labels = [f'{gold_answer}' for _, _, gold_answer in to_do_exs]
+
+        bartscores, ans_scores, qa_texts = model_QA.predict(formated_inputs, labels)
+
+        return bartscores, ans_scores, qa_texts
 
 
     def _compute_question_answering(
@@ -87,7 +101,7 @@ class Token_QuestEval(QuestEval):
                         log_1['asked'][question] = dict()
 
                     if name_model_qa not in log_1['asked'][question]:
-                        to_do_exs += [(question, log_1['text'])]
+                        to_do_exs += [(question, log_1['text'], gold_answer['text'])]
                         to_do_exs_idxs += [idx]
                         to_do_gold_asws += [gold_answer]
 
@@ -96,9 +110,10 @@ class Token_QuestEval(QuestEval):
                         log_1['asked'][question][name_model_qa]['ground_truth'][gold_answer['text']] = {}
 
         if len(to_do_exs) != 0:
-            answerability_scores, qa_texts = self._predict_answers(to_do_exs, type_logs_1)
+            #to modify
+            bartscores, answerability_scores, qa_texts = self._predict_answers(to_do_exs, type_logs_1)
 
-            assert len(to_do_exs) == len(qa_texts) == len(to_do_gold_asws) == len(answerability_scores)
+            assert len(to_do_exs) == len(qa_texts) == len(to_do_gold_asws) == len(answerability_scores) == len(bartscores)
             for i in range(len(to_do_exs)):
 
                 question = to_do_exs[i][0]
@@ -108,24 +123,26 @@ class Token_QuestEval(QuestEval):
                 if name_model_qa not in logs_1[idx]['asked'][question]:
                     logs_1[idx]['asked'][question][name_model_qa] = {'answer': qa_texts[i],
                                                                      'answerability': answerability_scores[i],
+                                                                     'bartscore': math.exp(bartscores[i]),
                                                                      'ground_truth': dict()
                                                                      }
                 logs_1[idx]['asked'][question][name_model_qa]['ground_truth'][to_do_gold_asws[i]['text']] = {'pos_tag': to_do_gold_asws[i]['pos_tag']}
 
         return len(to_do_exs) != 0
 
-    def _get_mask_questions(
-            self,
-            list_tokens: List[str]
-    ):
-        SEP = ' '
-        questions = []
+    def get_qas(self, doc):
+        PADDING_SIZE = self.ctx_padding_size
+        tokens = doc.split()  # split by space, to change for language like Chinese, Korean, etc.
+        list_questions = []
+        list_answers = []
 
-        for i in range(len(list_tokens)):
-            mask_text = SEP.join(list_tokens[:i]) + ' <mask> ' + ' '.join(list_tokens[i + 1:])
-            questions.append(mask_text)
+        for i in range(len(tokens)):
+            asw_token = tokens[i]
+            masked_text = ' '.join(tokens[max(0, i - PADDING_SIZE):i]) + ' <mask> ' + ' '.join(tokens[i + 1: i + PADDING_SIZE + 1])
+            list_answers.append({'text': asw_token, 'pos_tag': 'NA'})
+            list_questions.append(masked_text)
 
-        return questions
+        return list_questions, list_answers
 
     def _get_qa_pairs(
             self,
@@ -137,16 +154,9 @@ class Token_QuestEval(QuestEval):
 
         for text in to_do_exs:
             doc = self.spacy_pipeline(text)
-            doc_q = []
-            doc_a = []
 
-            for sent in [sent.text for sent in doc.sents][:5]:
-                sent_doc = self.spacy_pipeline(sent)
-                list_tokens = [token.text for token in sent_doc]
-                list_answers = [{'text': token.text, 'pos_tag': token.pos_} for token in sent_doc]
-
-                doc_q += self._get_mask_questions(list_tokens)
-                doc_a += list_answers
+            trimmed_doc = ' '.join([sent.text for sent in doc.sents][:self.limit_sent])
+            doc_q, doc_a = self.get_qas(trimmed_doc)
 
             answers.append(doc_a)
             question_texts.append(doc_q)
@@ -154,7 +164,7 @@ class Token_QuestEval(QuestEval):
         return answers, question_texts
 
 
-    def _compute_question_answer(
+    def _get_question_answers(
         self,
         logs: List[Dict],
         type_logs: str
@@ -201,7 +211,7 @@ class Token_QuestEval(QuestEval):
 
         logs, logs_hashes = self._load_logs(texts, type_logs, d_loaded_logs)
         # Selecting the question answer pairs
-        modified_logs = max(self._compute_question_answer(logs, type_logs), modified_logs)
+        modified_logs = max(self._get_question_answers(logs, type_logs), modified_logs)
         # Asking the questions on itself (Round trip consistency)
         if self.do_consistency:
             modified_logs = (self._compute_question_answering(logs, logs, type_logs, type_logs), modified_logs)
@@ -246,8 +256,8 @@ class Token_QuestEval(QuestEval):
         else:
             qa_pairs = list(zip(asked_questions, asked_answers))
 
-        if type_score == 'answerability':
-            scores = [questioned_log['asked'][q][name_model_qa]['answerability']
+        if type_score in ['answerability', 'bartscore']:
+            scores = [questioned_log['asked'][q][name_model_qa][type_score]
                       for q, _ in qa_pairs]
 
         else:  # F1 or BERTScore
@@ -283,10 +293,6 @@ class Token_QuestEval(QuestEval):
             if len(scores) == 0:
                 return 0
 
-            # exponential scale bartscore
-            if type_score == 'bartscore':
-                scores = [math.exp(x) for x in scores]
-
             # sometimes the answers scores return a value ~1.000000X which is superior to 1
             scores = list_borned(scores)
 
@@ -319,8 +325,8 @@ class Token_QuestEval(QuestEval):
 
         for type_score in self.list_scores:
 
-            # no need for comparison for answerabiliy, it is calculated directly in compute_question_answering
-            if type_score == 'answerability':
+            # no need for comparison for answerabiliy and bartscore, it is calculated directly in compute_question_answering
+            if type_score in ['answerability', 'bartscore']:
                 continue
 
             to_do_exs_idxs, to_do_questions, to_do_pred_asws, to_do_gold_asws, to_do_context = [], [], [], [], []
@@ -347,10 +353,6 @@ class Token_QuestEval(QuestEval):
                 elif type_score == 'bertscore':
                     sim_scores = calculate_BERTScore(to_do_pred_asws, to_do_gold_asws, self.metric_BERTScore,
                                                      device=self.device)
-                elif type_score == 'bartscore':
-                    sources_list = [(question + self.sep + context) for (question, context) in
-                               zip(to_do_questions, to_do_context)]
-                    sim_scores = model_QA.calculate_bartscore(sources=sources_list, ground_truth_answs=to_do_gold_asws)
                 else:
                     raise NotImplementedError(f"{type_score} not implemented")
 
@@ -367,7 +369,7 @@ class Token_QuestEval(QuestEval):
         # Textual hypothesis
         models = {"hyp": {}}
         if self.language == 'en':
-            models['hyp']['QA'] = f'yliu337/t5_token_nonfilter_bothcontext'
+            models['hyp']['QA'] = f'yliu337/sliding_window_token_both_ctx'
             models['hyp']['QG'] = f'{HF_ORGANIZATION}/t5-qg_squad1-en'
         else:
             raise("Multilingual evaluation not handled yet.")
@@ -436,7 +438,7 @@ class Token_QuestEval_src(Token_QuestEval):
             task: str = "text2text",
             language: str = "en",
             answer_types: Tuple = ('TOKEN',),
-            list_scores: Tuple = ('f1',),
+            list_scores: Tuple = ('f1', 'bartscore',),
             src_preproc_pipe=None,
             do_weighter: bool = False,
             do_consistency: bool = False,
@@ -485,7 +487,7 @@ class Token_QuestEval_hyp(Token_QuestEval):
             task: str = "text2text",
             language: str = "en",
             answer_types: Tuple = ('TOKEN',),
-            list_scores: Tuple = ('f1',),
+            list_scores: Tuple = ('f1', 'bartscore',),
             src_preproc_pipe=None,
             do_weighter: bool = False,
             do_consistency: bool = False,
