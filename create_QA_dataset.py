@@ -7,34 +7,25 @@ import random
 from datasets import load_dataset
 
 
-def get_qas(list_sentences):
-    SEP = ' '
-    PADDING_SIZE = 24
-    qas = []
+def get_masked_sequences(article, highlights):
+      examples = []
+      article_tokens = article.split()[:250]
+      highlights_tokens = highlights.split()
+      tokens = article_tokens + ['<sep>'] + highlights_tokens
 
-    tokenized_sentences = [sentence.split() for sentence in list_sentences]
+      for i in range(len(tokens)):
+          if tokens[i] != '<sep>':
+              label = tokens[i]
+              masked = ' '.join(tokens[0:i]) + ' <mask> ' + ' '.join(tokens[i + 1:])
+              pair = {'answer': label, 'question': masked}
+              examples.append(pair)
 
-    for i in range(len(tokenized_sentences)):
-        tokens = tokenized_sentences[i]
-        index = random.randint(0, len(tokens) - 1)
-        asw_token = tokens[index]
-        mask_text = SEP.join(tokens[:index]) + ' <mask> ' + ' '.join(tokens[index + 1:])
+      random_indices = random.sample(range(len(examples)), min(10, len(examples)))
+      output_examples = []
+      for i in random_indices:
+          output_examples.append(examples[i])
 
-        question = mask_text
-
-        if PADDING_SIZE > 0:
-            if i - 1 >= 0:
-                left_neighbor = tokenized_sentences[i - 1]
-                question = SEP.join(left_neighbor[-PADDING_SIZE:]) + SEP + question
-
-            if i + 1 < len(tokenized_sentences):
-                right_neighbor = tokenized_sentences[i + 1]
-                question = question + SEP + SEP.join(right_neighbor[:PADDING_SIZE])
-
-        QA_pair = {'answer': asw_token, 'question': question}
-        qas.append(QA_pair)
-
-    return qas
+      return output_examples
 
 def split_on_punct(doc):
     start = 0
@@ -65,25 +56,21 @@ def main():
 
     #get the dataset
     dataset = load_dataset('cnn_dailymail', '3.0.0')
-    train_dataset = dataset['validation']
+    train_dataset = dataset['train']
 
     MAX = 5000
     counter = 0
     
     #writing new dataset
-    with open("cnn_token_ctx_article.jsonl", mode='w', encoding='utf-8') as outfile:
+    with open("weight_cnn_token.jsonl", mode='w', encoding='utf-8') as outfile:
         for e in train_dataset:
             counter = counter + 1
             highlights = e['highlights']
             article = e['article']
 
-            highlights_sents = sentencize(highlights, spacy_pipeline)
-            article_sents = sentencize(article, spacy_pipeline)[:5]
+            qas = get_masked_sequences(article, highlights)
 
-            context = ' '.join(article_sents)
-            qas = get_qas(highlights_sents)
-
-            json_record = json.dumps({'id': counter, 'context': context, 'qas': qas}, ensure_ascii=False)
+            json_record = json.dumps({'id': counter, 'context': ' ', 'qas': qas}, ensure_ascii=False)
             outfile.write(json_record + '\n')
 
             if counter > MAX:

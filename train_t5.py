@@ -18,13 +18,11 @@ def main():
     transformers_logger = logging.getLogger("transformers")
     transformers_logger.setLevel(logging.WARNING)
 
-    pos_data = load_jsonl('/home/mila/y/yu-lu.liu/train_t5/data/token_data/cnn_token_ctx_article.jsonl')
-    inv_pos_data = load_jsonl('/home/mila/y/yu-lu.liu/train_t5/data/token_data/cnn_token_ctx_highlight.jsonl')
-
-
-    train_data = pos_data[:40000] + inv_pos_data[:40000]
-    eval_data = pos_data[-10000:] + inv_pos_data[-10000:]
-
+    data = load_jsonl('/home/mila/y/yu-lu.liu/Token_QuestEval/QA_data/weight_cnn_token.jsonl')
+   
+    train_data = data[:4000]
+    eval_data = data[-1000:]
+ 
     random.shuffle(train_data)	
     random.shuffle(eval_data)	
 
@@ -39,7 +37,7 @@ def main():
     model_args.evaluate_during_training_steps = 5000
     model_args.save_steps = 5000
     model_args.silent = True
-    model_args.output_dir = "train_t5QA_outputs/"
+    model_args.output_dir = "train_t5_outputs/"
     model_args.special_tokens_list = ['<mask>', '<sep>', '<unanswerable>']
 
     #define the model
