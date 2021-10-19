@@ -1,3 +1,13 @@
+# Quick Notes for Usage
+Generic Usage:
+```
+from questeval.token_questeval import Token_QuestEval
+questeval = Token_QuestEval(doc_types=X, list_scores=Y)
+```
+- X is a tuple of either ('mask_src',), ('mask_hyp',), or by default ('mask_hyp', 'mask_src'). This decides which sort of masked segments you want to consider in your score computation. 'mask_src' refers to masked segmented created from masking the source document, same logic for 'mask_hyp.'
+- Y is a tuple of either ('f1',), ('bartscore',), or by default ('bartscore', 'f1'). This decides which metric you want to consider for every pair (masked segment, predicted fill). 
+- IMPORTANT NOTE: in BEAMetrics, only doc_types is separated into three different metrics. So running the correlation score computation runs doc_type = ('mask_src',), ('mask_hyp',), and ('mask_hyp', 'mask_src'). This is currently impossible to do for list_scores, which requires you to set it up manually before running the correlation score computation in BEAMetrics.
+
 # Token QuestEval
 Token QuestEval is a modification of QuestEval  (license and release details below.)
 ![GitHub](https://img.shields.io/github/license/ThomasScialom/QuestEval)
