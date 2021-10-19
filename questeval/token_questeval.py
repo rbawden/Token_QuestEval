@@ -26,6 +26,7 @@ class Token_QuestEval(QuestEval):
             language: str = "en",
             answer_types: Tuple = ('TOKEN',),
             list_scores: Tuple = ('f1', 'bartscore',),
+            doc_types: Tuple = ('mask_src', 'mask_hyp'),
             src_preproc_pipe=None,
             do_weighter: bool = False,
             do_consistency: bool = False,
@@ -51,12 +52,37 @@ class Token_QuestEval(QuestEval):
             no_cuda,
             use_cache)
         self.sep = "<sep>"
+        self.doc_types = doc_types
+        self.bartscore = 'bartscore' in list_scores
+
         self.filter_answ = False
         self.filter_pos = False
         self.ctx_padding_size = 24
 
         self.wanted_pos = ["VERB", "NOUN", "PROPN"]
         self.stopwords = ['i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves', 'you', "you're", "you've", "you'll", "you'd", 'your', 'yours', 'yourself', 'yourselves', 'he', 'him', 'his', 'himself', 'she', "she's", 'her', 'hers', 'herself', 'it', "it's", 'its', 'itself', 'they', 'them', 'their', 'theirs', 'themselves', 'what', 'which', 'who', 'whom', 'this', 'that', "that'll", 'these', 'those', 'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being', 'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing', 'a', 'an', 'the', 'and', 'but', 'if', 'or', 'because', 'as', 'until', 'while', 'of', 'at', 'by', 'for', 'with', 'about', 'against', 'between', 'into', 'through', 'during', 'before', 'after', 'above', 'below', 'to', 'from', 'up', 'down', 'in', 'out', 'on', 'off', 'over', 'under', 'again', 'further', 'then', 'once', 'here', 'there', 'when', 'where', 'why', 'how', 'all', 'any', 'both', 'each', 'few', 'more', 'most', 'other', 'some', 'such', 'no', 'nor', 'not', 'only', 'own', 'same', 'so', 'than', 'too', 'very', 's', 't', 'can', 'will', 'just', 'don', "don't", 'should', "should've", 'now', 'd', 'll', 'm', 'o', 're', 've', 'y', 'ain', 'aren', "aren't", 'couldn', "couldn't", 'didn', "didn't", 'doesn', "doesn't", 'hadn', "hadn't", 'hasn', "hasn't", 'haven', "haven't", 'isn', "isn't", 'ma', 'mightn', "mightn't", 'mustn', "mustn't", 'needn', "needn't", 'shan', "shan't", 'shouldn', "shouldn't", 'wasn', "wasn't", 'weren', "weren't", 'won', "won't", 'wouldn', "wouldn't"]
+
+    def _calculate_score_from_logs(
+        self,
+        hyp_log: List[Dict],
+        compared_logs: List[List[Dict]]
+    ) -> float:
+
+        scores = []
+        for compared_log in compared_logs:
+            if compared_log['text'] == '' or hyp_log['text'] == '':
+                score = 0
+            else:
+                if 'mask_src' in self.doc_types:
+                    hyp_score = self._base_score(hyp_log, compared_log)
+                    score = hyp_score
+                if 'mask_hyp' in self.doc_types:
+                    compared_score = self._base_score(compared_log, hyp_log)
+                    score = compared_score
+                if 'mask_hyp' in self.doc_types and 'mask_src' in self.doc_types:
+                    score = np.average([hyp_score, compared_score])
+            scores.append(score)
+        return self.reduction_multi_refs(scores)
 
     def _predict_answers(
         self,
@@ -67,7 +93,7 @@ class Token_QuestEval(QuestEval):
         formated_inputs = [f'{question} {self.sep} {context}' for question, context, _ in to_do_exs]
         labels = [f'{gold_answer}' for _, _, gold_answer in to_do_exs]
 
-        bartscores, ans_scores, qa_texts = model_QA.predict(formated_inputs, labels)
+        bartscores, ans_scores, qa_texts = model_QA.predict(formated_inputs, labels, self.bartscore)
 
         return bartscores, ans_scores, qa_texts
 
@@ -432,101 +458,3 @@ class Token_QuestEval(QuestEval):
             raise NotImplementedError(f'Model Name Not Handled: the model name should contain t5 ({model_name}).')
 
         return model
-
-class Token_QuestEval_src(Token_QuestEval):
-    def __init__(
-            self,
-            task: str = "text2text",
-            language: str = "en",
-            answer_types: Tuple = ('TOKEN',),
-            list_scores: Tuple = ('f1', 'bartscore',),
-            src_preproc_pipe=None,
-            do_weighter: bool = False,
-            do_consistency: bool = False,
-            qg_batch_size: int = 48,
-            clf_batch_size: int = 48,
-            limit_sent: int = 5,
-            reduction_multi_refs: Callable = max,
-            no_cuda: bool = False,
-            use_cache: bool = True
-    ) -> None:
-        super().__init__(
-            task,
-            language,
-            answer_types,
-            list_scores,
-            src_preproc_pipe,
-            do_weighter,
-            do_consistency,
-            qg_batch_size,
-            clf_batch_size,
-            limit_sent,
-            reduction_multi_refs,
-            no_cuda,
-            use_cache)
-        self.sep = "<sep>"
-
-    def _calculate_score_from_logs(
-            self,
-            hyp_log: List[Dict],
-            compared_logs: List[List[Dict]]
-    ) -> float:
-
-        scores = []
-        for compared_log in compared_logs:
-            if compared_log['text'] == '' or hyp_log['text'] == '':
-                score = 0
-            else:
-                compared_score = self._base_score(compared_log, hyp_log)
-                score = compared_score
-            scores.append(score)
-        return self.reduction_multi_refs(scores)
-
-class Token_QuestEval_hyp(Token_QuestEval):
-    def __init__(
-            self,
-            task: str = "text2text",
-            language: str = "en",
-            answer_types: Tuple = ('TOKEN',),
-            list_scores: Tuple = ('f1', 'bartscore',),
-            src_preproc_pipe=None,
-            do_weighter: bool = False,
-            do_consistency: bool = False,
-            qg_batch_size: int = 48,
-            clf_batch_size: int = 48,
-            limit_sent: int = 5,
-            reduction_multi_refs: Callable = max,
-            no_cuda: bool = False,
-            use_cache: bool = True
-    ) -> None:
-        super().__init__(
-            task,
-            language,
-            answer_types,
-            list_scores,
-            src_preproc_pipe,
-            do_weighter,
-            do_consistency,
-            qg_batch_size,
-            clf_batch_size,
-            limit_sent,
-            reduction_multi_refs,
-            no_cuda,
-            use_cache)
-        self.sep = "<sep>"
-
-    def _calculate_score_from_logs(
-        self,
-        hyp_log: List[Dict],
-        compared_logs: List[List[Dict]]
-    ) -> float:
-
-        scores = []
-        for compared_log in compared_logs:
-            if compared_log['text'] == '' or hyp_log['text'] == '':
-                score = 0
-            else:
-                hyp_score = self._base_score(hyp_log, compared_log)
-                score = hyp_score
-            scores.append(score)
-        return self.reduction_multi_refs(scores)

@@ -1,6 +1,6 @@
 from typing import List, Dict
 from beametrics.metrics.metrics import MetricBase
-from questeval.token_questeval import Token_QuestEval, Token_QuestEval_src, Token_QuestEval_hyp
+from questeval.token_questeval import Token_QuestEval
 
 class MetricTokenQuestEval(MetricBase):
     def __init__(
@@ -29,18 +29,18 @@ class MetricTokenQuestEval(MetricBase):
 
         return {self.metric_name(): res['ex_level_scores']}
 
-class MetricTokenQuestEval_hyp(MetricBase):
+class MetricTokenQuestEval_mask_src(MetricBase):
     def __init__(
         self,
         lang: str,
         task: str,
         *args, **kwargs
     ):
-        self.metric = Token_QuestEval_hyp(language=lang, task=task)
+        self.metric = Token_QuestEval(language=lang, task=task, doc_types=('mask_src',))
 
     @classmethod
     def metric_name(cls):
-        return 'token_questeval_hyp'
+        return 'token_questeval_mask_src'
 
     def pipeline(
             self,
@@ -56,18 +56,18 @@ class MetricTokenQuestEval_hyp(MetricBase):
 
         return {self.metric_name(): res['ex_level_scores']}
 
-class MetricTokenQuestEval_src(MetricBase):
+class MetricTokenQuestEval_mask_hyp(MetricBase):
     def __init__(
         self,
         lang: str,
         task: str,
         *args, **kwargs
     ):
-        self.metric = Token_QuestEval_src(language=lang, task=task)
+        self.metric = Token_QuestEval(language=lang, task=task, doc_types=('mask_hyp',))
 
     @classmethod
     def metric_name(cls):
-        return 'token_questeval_src'
+        return 'token_questeval_mask_hyp'
 
     def pipeline(
             self,

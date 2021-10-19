@@ -78,6 +78,7 @@ class API_T2T:
         self,
         sources: List[str],
         ground_truth_answs: List[str],
+        compute_bartscore: bool
     ):
         # sources should be question <s> context
         bartscore_list = []
@@ -103,7 +104,6 @@ class API_T2T:
                 verbose=False,
             )
 
-            # generate answer + compute answerability
             with torch.no_grad():
                 source_ids, source_mask = encoded_src["input_ids"], encoded_src["attention_mask"]
                 dict_generated_ids = self.model.generate(
@@ -117,25 +117,6 @@ class API_T2T:
                     output_scores=True,
                     return_dict_in_generate=True
                 )
-
-                tgt_tokens = encoded_tgt['input_ids'].to(self.model.device)
-                tgt_mask = encoded_tgt['attention_mask']
-                tgt_len = tgt_mask.sum(dim=1).to(self.model.device)
-
-                #compute bartscore
-                bartscore_output = self.model(
-                    input_ids=encoded_src['input_ids'].to(self.model.device),
-                    attention_mask=encoded_src['attention_mask'].to(self.model.device),
-                    labels=tgt_tokens
-                )
-
-                logits = bartscore_output.logits.view(-1, self.model.config.vocab_size)
-                loss = self.loss_fct(self.lsm(logits), tgt_tokens.view(-1))
-                loss = loss.view(tgt_tokens.shape[0], -1)
-                loss = loss.sum(dim=1) / tgt_len
-                curr_score_list = [-x.item() for x in loss]
-
-                bartscore_list += curr_score_list
 
                 # generate answers + compute answerability
                 gen_text = self.tokenizer.batch_decode(
@@ -151,6 +132,27 @@ class API_T2T:
                     keep_score_idx_score = keep_score_idx_score.squeeze()
                 keep_score_idx_scores += keep_score_idx_score.tolist()
 
+
+                if compute_bartscore:
+                    tgt_tokens = encoded_tgt['input_ids'].to(self.model.device)
+                    tgt_mask = encoded_tgt['attention_mask']
+                    tgt_len = tgt_mask.sum(dim=1).to(self.model.device)
+
+                    bartscore_output = self.model(
+                        input_ids=encoded_src['input_ids'].to(self.model.device),
+                        attention_mask=encoded_src['attention_mask'].to(self.model.device),
+                        labels=tgt_tokens
+                    )
+
+                    logits = bartscore_output.logits.view(-1, self.model.config.vocab_size)
+                    loss = self.loss_fct(self.lsm(logits), tgt_tokens.view(-1))
+                    loss = loss.view(tgt_tokens.shape[0], -1)
+                    loss = loss.sum(dim=1) / tgt_len
+                    curr_score_list = [-x.item() for x in loss]
+
+                    bartscore_list += curr_score_list
+                else:
+                    bartscore_list += [-999]*len(keep_score_idx_score.tolist())
 
         return bartscore_list, keep_score_idx_scores, gen_texts
 
