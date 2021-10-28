@@ -147,3 +147,77 @@ See that the log is a dictionary with the following keys and values:
 1. For every log files, it retrieves the text by taking `log['text']`. 
 2. For each text, `_get_qas` is called to generate masked segements and ground truth labels. 
 [INSERT PICTURE HERE]
+ 
+At this step, the `log['self']` should contain the masked segments and the ground-truth labels like so:
+```
+"self": {
+    "TOKEN": {
+      "QG_hash=ThomasNLG/t5-qg_squad1-en": {
+        "questions": [
+          " <mask> cat jumped over the fence to chase after the bird .",
+          "The <mask> jumped over the fence to chase after the bird .",
+          "The cat <mask> over the fence to chase after the bird .",
+          "The cat jumped <mask> the fence to chase after the bird .",
+          "The cat jumped over <mask> fence to chase after the bird .",
+          "The cat jumped over the <mask> to chase after the bird .",
+          "The cat jumped over the fence <mask> chase after the bird .",
+          "The cat jumped over the fence to <mask> after the bird .",
+          "The cat jumped over the fence to chase <mask> the bird .",
+          "The cat jumped over the fence to chase after <mask> bird .",
+          "The cat jumped over the fence to chase after the <mask> .",
+          "The cat jumped over the fence to chase after the bird <mask> "
+        ]
+      },
+      "answers": [
+        {
+          "text": "The",
+          "pos_tag": "DET"
+        },
+        {
+          "text": "cat",
+          "pos_tag": "NOUN"
+        },
+        {
+          "text": "jumped",
+          "pos_tag": "VERB"
+        },
+        {
+          "text": "over",
+          "pos_tag": "ADP"
+        },
+        {
+          "text": "the",
+          "pos_tag": "DET"
+        },
+        {
+          "text": "fence",
+          "pos_tag": "NOUN"
+        },
+        {
+          "text": "to",
+          "pos_tag": "PART"
+        },
+        {
+          "text": "chase",
+          "pos_tag": "VERB"
+        },
+        {
+          "text": "after",
+          "pos_tag": "ADP"
+        },
+        {
+          "text": "the",
+          "pos_tag": "DET"
+        },
+        {
+          "text": "bird",
+          "pos_tag": "NOUN"
+        },
+        {
+          "text": ".",
+          "pos_tag": "PUNCT"
+        }
+      ]
+    }
+  }
+```
