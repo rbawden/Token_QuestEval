@@ -99,3 +99,36 @@ print(score)
 ## 4/ Computing Correlation Scores [run_all.py](https://github.com/YuLuLiu/Token_QuestEval/blob/main/run_all.py) 
 No change has been made to the computation of correlation scores. For example, for CNN-Dailymail, run: `python run_all.py --dataset SummarizationCNNDM`.
 **Don't forget to unpack the data as detailed [run_all.py](https://github.com/ThomasScialom/BEAMetrics)**
+  
+  
+# `token_questeval.py` Pipeline
+##  Overview
+**Note: Presented below is an overview of the steps taken to compute a score. Details about each function mentioned will follow in subsequent sections.**
+
+Below is an example of instantiating `Token_QuestEval` and using it on two pairs of texts. 
+```
+from questeval.token_questeval import Token_QuestEval
+questeval = Token_QuestEval()
+
+source_1 = "The cat jumped over the fence to chase after the bird."
+prediction_1 = "To catch the bird, the cat leaped over the fence."
+
+source_2 = "The bird flies, landing on the top of the oak tree."
+prediction_2 = "The bird escaped to the top of the tree."
+
+score = questeval.corpus_questeval(
+    hypothesis=[prediction_1, prediction_2], 
+    sources=[source_1, source_2]
+)
+
+print(score)
+```
+When we instantiate the class using `questeval = Token_QuestEval()`, models are being loaded using `_load_all_models` and `get_model`. Focus on [line 123](https://github.com/YuLuLiu/Token_QuestEval/blob/main/questeval/token_questeval.py#L123) to make sure that you're loading a T5 model that is appropriately trained. If memory is an issue, feel free to delete other lines, or to make sure that `get_model` is only called on models that you need to use.
+
+
+When `corpus_questeval` is called, the input is divided in batches and passed into a method called `_batch_questeval`, which is on [line 67](https://github.com/YuLuLiu/Token_QuestEval/blob/main/questeval/token_questeval.py#L67). It is the method that outlines the steps taken to compute the scores for the input pair of texts.
+1. `_texts2logs` is called to write information such as the input text itself, the created masked segments and the ground truth labels into log files. Log files are stored in the  `Token_QuestEval/questeval/logs` folder.
+2. `_compute_question_answering` is called twice: one time to fill the masked segments created from the hypothesis with the source, and one time to do the inverse: fill the masked segments created from the source with the hypothesis.
+3. `_compute_answer_similarity_scores` is called to compute the f1 score between the predicted text from the previous step and the ground truth label. This step is applied on all log files.
+4. `_calculate_score_from_logs` is finally called to compute the Token_QuestEval score for the input text using the log files. 
+
