@@ -132,3 +132,18 @@ When `corpus_questeval` is called, the input is divided in batches and passed in
 3. `_compute_answer_similarity_scores` is called to compute the f1 score between the predicted text from the previous step and the ground truth label. This step is applied on all log files.
 4. `_calculate_score_from_logs` is finally called to compute the Token_QuestEval score for the input text using the log files. 
 
+##  Loading Log Files
+The main method  of this step is `_texts2logs` at [line 187](https://github.com/YuLuLiu/Token_QuestEval/blob/main/questeval/token_questeval.py#L187). It calls several methods as detailed below:
+###### a) `_load_logs`
+1. Hash the text and uses it as the filename of the log file that corresponds to the text. For example, we would hash *"The cat jumped over the fence to chase after the bird."* and use the hash value as filename. See [line 187](https://github.com/YuLuLiu/Token_QuestEval/blob/main/questeval/token_questeval.py#L187)
+2. If the hash value has never been seen before (If we don't have a log file in our `logs` folder corresponding to the text), create the log at [line 223](https://github.com/YuLuLiu/Token_QuestEval/blob/main/questeval/token_questeval.py#L223)
+See that the log is a dictionary with the following keys and values:
+    -  **type**: the type of text. If it's a hypothesis, it would store the string **hyp**. If it's a source, it would store the string **src**. With our example of *"The cat jumped over the fence to chase after the bird."*, it would be **src**.
+    -  **text**: the string of the text itself: *"The cat jumped over the fence to chase after the bird."*
+    -  **self**: it's an empty dictionary that will later store the masked segments and the ground truth labels that are generated from the text (the **text** just above)
+    -  **asked**: it's an empty dictionary that will later store the masked segments and the ground truth labels that are generated from the text (the **text** just above)
+
+###### b) `_get_question_answers`
+1. For every log files, it retrieves the text by taking `log['text']`. 
+2. For each text, `_get_qas` is called to generate masked segements and ground truth labels. 
+[INSERT PICTURE HERE]
