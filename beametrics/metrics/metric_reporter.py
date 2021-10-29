@@ -3,7 +3,7 @@ from beametrics.utils import component_logger
 from beametrics.metrics import _D_METRICS
 
 _DEFAULT_METRIC_NAMES = (
-    'token_questeval', 'token_questeval_hyp', 'token_questeval_src')
+    'token_questeval', 'token_questeval_mask_src', 'token_questeval_mask_hyp')
 
 _DEFAULT_METRIC_NAMES_SRC = ('abstractness', )
 
