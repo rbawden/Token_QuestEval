@@ -146,9 +146,62 @@ See that the log is a dictionary with the following keys and values:
 ###### b) `_get_question_answers`
 1. For every log files, it retrieves the text by taking `log['text']`. 
 2. For each text, `_get_qas` is called to generate masked segements and ground truth labels. 
-![masked segment creation](https://github.com/YuLuLiu/Token_QuestEval/blob/main/README_images/masked_segment_creation.PNG)
- 
+<img src="https://github.com/YuLuLiu/Token_QuestEval/blob/main/README_images/masked_segment_creation.PNG" width="200">
 At this step, the `log['self']` should contain the masked segments and the ground-truth labels like so:
 ```
-
+"self": {
+    "TOKEN": {
+      "QG_hash=ThomasNLG/t5-qg_squad1-en": {
+        "questions": [
+          " <mask> is a cat .",
+          "It <mask> a cat . It",
+          "It is <mask> cat . It jumps",
+          "It is a <mask> . It jumps away",
+          "It is a cat <mask> It jumps away .",
+          "is a cat . <mask> jumps away .",
+          "a cat . It <mask> away .",
+          "cat . It jumps <mask> .",
+          ". It jumps away <mask> "
+        ]
+      },
+      "answers": [
+        {
+          "text": "It",
+          "pos_tag": "PRON"
+        },
+        {
+          "text": "is",
+          "pos_tag": "AUX"
+        },
+        {
+          "text": "a",
+          "pos_tag": "DET"
+        },
+        {
+          "text": "cat",
+          "pos_tag": "NOUN"
+        },
+        {
+          "text": ".",
+          "pos_tag": "PUNCT"
+        },
+        {
+          "text": "It",
+          "pos_tag": "PRON"
+        },
+        {
+          "text": "jumps",
+          "pos_tag": "VERB"
+        },
+        {
+          "text": "away",
+          "pos_tag": "ADV"
+        },
+        {
+          "text": ".",
+          "pos_tag": "PUNCT"
+        }
+      ]
+    }
+  }
 ```
