@@ -4,7 +4,7 @@ import pickle
 from multiprocessing import Pool
 from os import truncate
 from typing import Tuple
-
+import re
 import pandas as pd
 import torch
 from tokenizers.implementations import ByteLevelBPETokenizer
@@ -14,7 +14,7 @@ from tqdm.auto import tqdm
 from transformers import PreTrainedTokenizer
 from datasets import load_dataset
 from datasets import Dataset as HFDataset
-
+import random
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +88,7 @@ def preprocess_for_pred(batch, tokenizer, args):
     output = {"input_ids": [], "attention_mask": []}
 
     for example in batch:
+        print(example)
         context = example['context']
         qas = example['qas']
         for qa in qas:
@@ -125,14 +126,14 @@ def preprocess_data(data):
     return output
 
 class T5Dataset(Dataset):
-    def __init__(self, tokenizer, args, data, mode):
+    def __init__(self, tokenizer, args, data, mode, filename=""):
         cached_features_file = os.path.join(
             args.cache_dir,
-            args.model_name.replace("/", "_")
-            + "_cached_"
+            "cached_"
             + str(args.max_seq_length)
-            + str(len(data)),
-        )
+            + str(len(data))
+            + filename.split('/')[-1]
+        ) #args.model_name.replace("/", "_")
 
         if os.path.exists(cached_features_file) and (
             (not args.reprocess_input_data and not args.no_cache)
@@ -141,8 +142,10 @@ class T5Dataset(Dataset):
             logger.info(" Loading features from cached file %s", cached_features_file)
             with open(cached_features_file, "rb") as handle:
                 self.examples = pickle.load(handle)
+                #random.shuffle(self.examples) # RB addition
         else:
             logger.info(" Creating features from dataset file at %s", args.cache_dir)
+            logger.info(" To be output to %s", cached_features_file)
 
             data = [(example, tokenizer, args) for example in data]
 
