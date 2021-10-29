@@ -34,6 +34,7 @@ pip install -r requirements.txt
 **Note: Presented below is an overview of the steps taken to compute a score. Details about each function mentioned will follow in subsequent sections.**
 
 Below is an example of instantiating `Token_QuestEval` and using it on two pairs of texts. 
+    
 ```
 from questeval.token_questeval import Token_QuestEval
 questeval = Token_QuestEval()
@@ -50,7 +51,9 @@ score = questeval.corpus_questeval(
 )
 
 print(score)
+
 ```
+    
 When we instantiate the class using `questeval = Token_QuestEval()`, models are being loaded using `_load_all_models` and `get_model`. Focus on [line 123](https://github.com/YuLuLiu/Token_QuestEval/blob/main/questeval/token_questeval.py#L123) to make sure that you're loading a T5 model that is appropriately trained. If memory is an issue, feel free to delete other lines, or to make sure that `get_model` is only called on models that you need to use.
 
 
