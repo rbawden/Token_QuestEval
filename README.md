@@ -146,7 +146,7 @@ See that the log is a dictionary with the following keys and values:
 ###### b) `_get_question_answers`
 1. For every log files, it retrieves the text by taking `log['text']`. 
 2. For each text, `_get_qas` is called to generate masked segements and ground truth labels. 
-<img src="https://github.com/YuLuLiu/Token_QuestEval/blob/main/README_images/masked_segment_creation.PNG" width="200">
+<img src="https://github.com/YuLuLiu/Token_QuestEval/blob/main/README_images/masked_segment_creation.PNG" width="600">
 At this step, the `log['self']` should contain the masked segments and the ground-truth labels like so:
 ```
 "self": {
