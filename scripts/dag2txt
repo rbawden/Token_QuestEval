@@ -1,0 +1,397 @@
+#!/usr/bin/perl -w
+# 
+# This script is part of SxPipe, a freely-available tokenisation and shallow processing chain
+# Licence: Cecill-C (LGPL-compatible)
+# (c) Inria 2004-2017
+# Author: Benoît Sagot (benoit.sagot@inria.fr)
+#
+# Prototypical usage: cat tokenised_or_sxpiped_text | dag2txt -l <lang>
+#
+
+use strict;
+use Getopt::Long;
+use utf8;
+binmode STDIN, ":utf8";
+binmode STDOUT, ":utf8";
+binmode STDERR, ":utf8";
+$| = 1;
+
+my $lang = "fr";
+my $ambiguous_initial_cap = 0;
+my $no_force_cap = 0;
+my $dont_insert_missing_full_stops = 0;
+my $html = 0;
+my $entities = 0;
+my $no_anonymization = 0;
+GetOptions ('aic' => \$ambiguous_initial_cap,
+	    'nfc' => \$no_force_cap,
+	    'nffs' => \$dont_insert_missing_full_stops,
+	    'html' => \$html,
+	    'l:s', => \$lang,
+	    'entities' => \$entities,
+	    'no_a' => \$no_anonymization,
+	    'e' => \$entities
+	   );
+
+die "Options -nfc and -aic are incomatible" if ($no_force_cap && $ambiguous_initial_cap);
+
+my $previous_line_was_par_bound = 0;
+my $previous_line_ended_with_semicolon = 0;
+
+my $line_length = 0;
+while (<>) {
+  chomp;
+  #print STDERR "$_";<STDIN>;
+  if (/^\{(.*)\}\s*_XML\s*(?:\[\|(?:\|[^\]]|[^\|])*\|\]\s*)?$/) {
+    print "$1\n";
+    next;
+  } elsif (/ _PAR_BOUND/) {
+    if ($previous_line_was_par_bound == 0) {
+      print "<br>\n";
+    }
+    $previous_line_was_par_bound = 1;
+    next;
+  }
+  s/\[\|.*?\|\]//g;
+  s/  +/ /g;
+
+  # violent disambiguation of the DAG output by sxpipe
+  my $no_parent_no_pipe=qr/(?:\\[\(\)\|\\]|\">[^<]*[\(\)\|]|[^\(\)\|])/;
+  my $no_parent=qr/(?:\\[\(\|\)\\]|\">[^<]*\)|[^\(\)])/;
+
+  # on évite tant que possible _Uw puis _uw (dans cet ordre)
+  while (s/(^|\\\\|[^>\\])\((?:($no_parent*\|))?$no_parent_no_pipe*\s*_Uw\s*(?:(\|$no_parent*))?\)/$1\($2$3\)/g) {
+    s/(^|\\\\|[^\\>])\|\|/$1\|/g;
+    s/(^|\\\\|[^\\>])\(\|/$1\(/g;
+    s/(\\\\|[^\\>])\|\)/$1\)/g;
+  }
+  s/(^|\\\\|[^>\\])\(($no_parent_no_pipe*)\)/$1$2/;
+  while (s/(^|\\\\|[^>\\])\((?:($no_parent*\|))?$no_parent_no_pipe*\s*_uw\s*(?:(\|$no_parent*))?\)/$1\($2$3\)/g) {
+    s/(^|\\\\|[^\\>])\|\|/$1\|/g;
+    s/(^|\\\\|[^\\>])\(\|/$1\(/g;
+    s/(\\\\|[^\\>])\|\)/$1\)/g;
+  }
+  s/(^|\\\\|[^>\\])\(($no_parent_no_pipe*)\)/$1$2/g;
+  # we prefer multi-word units
+  while (s/(^|\\\\|[^>\\])\($no_parent*(?:\($no_parent*\)$no_parent*)?\|($no_parent_no_pipe*\s*[^ ]+_[^ ]+\s*\|)/$1\($2/g) {
+  }
+  while (s/((?:\\\\|[^>\\])\|$no_parent_no_pipe*\s*[^ ]+_[^ ]+\s*)\|$no_parent*(?:\($no_parent*\)$no_parent*)?\)/$1\)/g) {
+  }
+  while (s/(^|\\\\|[^>\\])\($no_parent*(?:\($no_parent*\)$no_parent*)?\|($no_parent_no_pipe*\s*[^ ]+_[^ ]+\s*)\)/$1$2/g) {
+  }
+  #print STDERR "$_";<STDIN>;
+  # we take the first alternative...
+  while (s/(^|\\\\|[^>\\])\(($no_parent_no_pipe*)\|$no_parent*\)/$1$2()/g) {
+    s/(^|\\\\|[^>\\])\(($no_parent_no_pipe*)\)/$1$2/g;
+    #print STDERR "$_";<STDIN>;
+  }
+  #print STDERR "$_";<STDIN>;
+  for my $l (split(/(?=\{)/,$_)) {
+    $l =~ s/[\{\}]//g;
+    $l =~ s/<\/?F[^>]*>//g;
+    $l =~ s/  +/ /g;
+    $l =~ s/^ //;
+    $l =~ s/ $//;
+    $l =~ s/^(.*) /$1\t/;
+    $l =~ s/_/ /g;
+    $l =~ /^(.*)\t(.*)$/;
+    #if (remove_diacritics(lc($1)) ne remove_diacritics(lc($2)))\{print STDERR "$l\n";\}
+  }
+
+  #  print STDERR "3:$_\n";
+  s/(\s*)(\(\))/$2$1/g;
+
+  # premier round (pour les cas de type "1) machin")
+  if ($ambiguous_initial_cap || ($previous_line_ended_with_semicolon && $no_force_cap == 0)) {
+    my $first_char = '';
+    /^\s*(?:\{[^\}]*\}\s*)?([^\{\s])/;
+    $first_char = $1;
+    if (remove_diacritics($first_char) =~ /^[a-z]$/) {
+      s/^\s*((?:\{[^\}]*\} *_(?:META|SENT)[^\{ ]+ *)*\{[^\}]*\}\s*)([^\{\s])/$1."¦¦".$2."¦¦".uc($2)."¦¦"/e;
+      s/^\s*((?:\{[^\}]*\} *_(?:META|SENT)[^\{ ]+ *)*)([^\{\s])/$1."¦¦".$2."¦¦".uc($2)."¦¦"/e;
+    } else {
+      s/^\s*((?:\{[^\}]*\} *_(?:META|SENT)[^\{ ]+ *)*\{[^\}]*\}\s*)([^\{\s])/$1.uc($2)/e;
+      s/^\s*((?:\{[^\}]*\} *_(?:META|SENT)[^\{ ]+ *)*)([^\{\s])/$1.uc($2)/e;
+    }
+  } elsif ($no_force_cap == 0) {
+    s/^ *((?:\{[^\}]*\} *_(?:META|SENT)[^\{ ]+ *)*\{[^\}]*\} *)([^_\{ ])/$1.uc($2)/e;
+    s/^ *((?:\{[^\}]*\} *_(?:META|SENT)[^\{ ]+ *)*)([^_\{ ])/$1.uc($2)/e;
+  }
+  s/¦¦(.)¦¦\1¦¦/$1/g;
+
+
+  if ($previous_line_was_par_bound) {
+    s/^\s*(\{[^\}]*\}\s*_META_TEXTUAL)/$1/;
+  } else {
+    s/^\s*(\{[^\}]*\}\s*_META_TEXTUAL)/<br>$1/;
+  }
+  s/(_SENT_BOUND\s*)(\{[^\}]*\}\s*_META_TEXTUAL)/$1 <br>$2/g;
+  s/_underscorepar_underscorebound/ <br>/g; # on a trouvé ça, à débugger ailleurs, mais en attendant...
+  
+  s/\{[^\}]*\}\s*_SPECWORD_(\S+)(\s|$)/$1 /g;
+
+  if ($entities) {
+    s/\{([^\}]*)\}\s*_([A-Z]\S*)(\s|$)/<$2>$1<\/$2>$3/g;
+  } elsif ($no_anonymization) {
+    while (s/(\{[^\}]*?) ([^\}]*\}\s*_SMILEY)/$1$2/g) {}
+    s/\{([^\}]*)\}\s*_(?:[A-Z][A-Za-z0-9_]*)/$1/g;  
+    while (s/(\{[^\}]*) ([\/]|\\\\) ([^\}]*\}\s*)(_DATE\S*|_NUM\S*)(\s|$)/$1$2$3$4$5/g) {
+    }
+  } else {
+    s/\{([^\}]*)\}\s*_(?:NP|PERSON_(\S*))(\s|$)/[name $2:$1]$3/g;
+    s/\{([^\}]*)\}\s*_(?:NP|PERSON\S*)(\s|$)/[name:$1]$2/g;
+    while (s/(\[name[^\]]*?) /$1 /g) {}
+    s/\{[^\}]*\}\s*_EMAIL(\s|$)/[e-mail address]$1/g;
+    s/\{[^\}]*\}\s*_TEL(\s|$)/[phone number]$1/g;
+    s/\{([^\}]*)\}\s*_(?:[A-Z][A-Za-z0-9_]*)/$1/g;  
+    while (s/(\{[^\}]*) ([\/]|\\\\) ([^\}]*\}\s*)(_DATE\S*|_NUM\S*)(\s|$)/$1$2$3$4$5/g) {
+    }
+  }
+
+  # deuxième round (pour les cas de type "\{pierre Dupont\} _NP")
+  if ($ambiguous_initial_cap || ($previous_line_ended_with_semicolon && $no_force_cap == 0)) {
+    my $first_char = '';
+    /^\s*(?:\{[^\}]*\}\s*)?([^\{\s])/;
+    $first_char = $1;
+    if (remove_diacritics($first_char) =~ /^[a-z]$/) {
+      s/^\s*(\{[^\}]*\}\s*)([^\{\s])/$1."¦¦".$2."¦¦".uc($2)."¦¦"/e;
+      s/^\s*()([^\{\s])/$1."¦¦".$2."¦¦".uc($2)."¦¦"/e;
+    } else {
+      s/^\s*(\{[^\}]*\} *)([^_\{ ])/$1.uc($2)/e;
+      s/^\s*()([^_\{ ])/$1.uc($2)/e;
+    }
+  } elsif ($no_force_cap == 0) {
+    s/^ *(\{[^\}]*\} *)([^_\{ ])/$1.uc($2)/e;
+    s/^ *()([^_\{ ])/$1.uc($2)/e;
+  }
+
+  if ($no_force_cap == 0) {
+    s/(_SENT_BOUND\s*(?:\{[^\}]*\}\s*)?)(.)/$1.uc($2)/ge;
+  }
+  #  print STDERR "$_\n";
+  while (s/\{([^\}]*?) *<F id=[^>]+>([^\}]*?)<\/F>([^\}]*?)\}\s*_SMILEY(\s|$)/\{$1$2$3\} _SMILEY$4/g) {
+  }
+
+  s/\{[^\}]*\}\s*_SENT_BOUND\s*//g;
+  s/\{([^\}]*)\}\s*_[A-Z][A-Za-z0-9_]*/$1/g;
+  while (s/(<F id=\")([^\"]+)(\"[^>]*>[^<]*<\/F>.*)<F id=\"\2\"[^>]*>[^<]*<\/F>/$1$2$3/g) {
+  }
+  s/\s+/ /g;
+  s/\{\} //g;
+  s/<F id=[^>]+>//g;
+  s/<\/F>//g;
+  if (!$ambiguous_initial_cap && !$previous_line_ended_with_semicolon && !$no_force_cap) {
+    s/^\s*(\S)/uc($1)/e;	# for what was inside comments of named entities
+  }
+
+  s/-_ \{[^}]*\} ([^_])/-_ $1/g;
+  s/ _?-(?=[^\s&])/-/g;
+
+  if ($lang eq "en") {
+    #    s/((?:^| )[Rr]e)-_? (?:\{.*?\} *)?([^e])/$1$2/g;  ## règle originale TP (?)
+    s/(\{[Rr]e[^-][^\}]*\} [Rr]e)-_? (?:\{.*?\} *)?([^e])/$1$2/g;
+    #    s/((?:^| )[Nn]on)-_? (?:\{.*?\} *)?([^A-ZÀÉÈÊËÂÄÔÖÛÜÇ])/$1$2/g;
+    s/(\{[Nn]on[^-][^\}]*\} [Nn]on)-_? (?:\{.*?\} *)?([^A-ZÀÉÈÊËÂÄÔÖÛÜÇ])/$1$2/g;
+    #    s/((?:^| )[Mm]ulti)-_? (?:\{.*?\} *)?([^i])/$1$2/g;
+    s/(\{[Mm]ulti[^-][^\}]*\} [Mm]ulti)-_? (?:\{.*?\} *)?([^i])/$1$2/g;
+    s/((?:^| ))([^ >]+)-_? \{\2[^-].*?\} */$1$2/g;
+  } elsif ($lang eq "fr") {
+    s/((?:^| )[Rr])e-_? (?:\{.*?\} *)?([aiou])/$1é$2/g;
+    s/((?:^| )[Rr]e)-_? (?:\{.*?\} *)?([^e])/$1$2/g;
+    s/((?:^| )[Ii]n)-_? (?:\{.*?\} *)?([mpb])/$1m$2/g;
+    s/((?:^| )[Ii]n)-_? (?:\{.*?\} *)?([^mpb])/$1n$2/g;
+    s/((?:^| )[Dd])é-_? (?:\{.*?\} *)?([aeéiou])/$1és$2/g;
+    s/((?:^| )[Dd])é-_? (?:\{.*?\} *)?([^aeéiou])/$1é$2/g;
+  }
+
+  s/\{([^\}]*)\}\s*([^\{]|\{\s*\})*\s+_([A-Z_]+|uw)/$1/g;
+  s/\{[^\}]*\}\s*([^_\s]\S*)/$1/g;
+
+  s/(?<=[^\s&])-_? /-/g;
+  s/^- /-/g;
+  s/ _?-(?=[^\s&])/-/g;
+  s/(?<=\S)_ //g;
+  s/ _(?=\S)//g;
+  while (s/([^_])_([^_])/$1 $2/g) {
+  }
+
+  s/\s+/ /g;
+  s/^\s+//;
+  s/\s+$//;
+
+  if ($lang ne "en") {
+    s/(^| )([^'][^ ]*\') /$1$2/g;
+  }
+
+  s/^(<br>)*- &gt;/$1-&gt;/g;
+
+  s/\\+([\[\]\(\)\+\?\*\|\\])/$1/g;
+  s/ „ (.*?) “ / „$1“ /g;
+  s/([\[\(‘“]) /$1/g;		# pas «
+  s/ ([\]\)”’])/$1/g;		# pas »
+  s/ ?\\+\%/\%/g;
+  s/ \(s\)/\(s\)/g;
+  if ($lang eq "fr") {
+    s/ \(es?\)/\(es?\)/g;
+    s/ \(nt\)/\(nt\)/g;
+  }
+
+  #  if ($lang eq "en") 
+  #\{
+  s/(^| )['`] (.*?) '( |$)/$1'$2'$3/g;
+  #  }
+  s/ ([\.,])/$1/g;
+  if ($lang eq "en") {
+    s/ ([;:\?\!])/$1/g;
+  }
+  s/(?<=[0-9]), (?=[0-9])/,/g;
+  s/([^ ])\%/$1 \%/g;
+
+  s/\{(.*?)\}/$1/g; # sécurité, mais risqué
+
+  s/_UNDERSCORE/_/g;
+  s/_ACC_O/\\{/g;
+  s/_ACC_F/\\}/g;    
+
+  if ($lang eq "fr") {
+    s/__adj//g;
+    s/e__prep le__det/u/g;
+    s/e__prep les__det/es/g;
+    s/e__prep lequel/uquel/g;
+    s/e__prep ledit/udit/g;
+    s/e__prep lesdits/esdits/g;
+    s/e__prep lesquels/esquels/g;
+    s/e__prep lesquelles/esquelles/g;
+    s/usqu'à le__det/usqu'au/g;
+    s/usqu'à les__det/usqu'aux/g;
+    s/i__csu il/'il/g;
+	
+    s/à__prep le__det/au/g;
+    s/à__prep les__det/aux/g;
+    s/à__prep lequel/auquel/g;
+    s/à__prep lesquels/auxquels/g;
+    s/à__prep lesquelles/auxquelles/g;
+    s/À__prep le__det/Au/g;
+    s/À__prep les__det/Aux/g;
+    s/À__prep lequel/Auquel/g;
+    s/À__prep lesquels/Auxquels/g;
+    s/À__prep lesquelles/Auxquelles/g;
+    s/en__prep les__det/ès/g;
+    s/En__prep les__det/Ès/g;
+    s/¦¦à¦¦À¦¦__prep le__det/¦¦a¦¦A¦¦u/g;
+    s/¦¦à¦¦À¦¦__prep les__det/¦¦a¦¦A¦¦ux/g;
+    s/¦¦à¦¦À¦¦__prep lequel/¦¦a¦¦A¦¦uquel/g;
+    s/¦¦à¦¦À¦¦__prep lesquels/¦¦a¦¦A¦¦uxquels/g;
+    s/¦¦à¦¦À¦¦__prep lesquelles/¦¦a¦¦A¦¦uxquelles/g;
+    s/¦¦e¦¦E¦¦n__prep les__det/¦¦è¦¦È¦¦s/g;
+  }
+
+  if ($lang eq "en") {
+    s/ ('ll|'[sdm]|n't|'re|'ve)(\W|$)/$1$2/g;
+    s/^Cann't/Can't/g;
+    s/ cann't/ can't/g;
+    s/^Willn't/Won't/g;
+    s/ willn't/ won't/g;
+    s/s's( |$)/s'$1/g;
+    my $not_apos = qr/(?:s' |[^ ]\'(?:ll|[sdmt]|[rv]e)|[^'‘’])/o;
+    while (s/^($not_apos*(?:(?:['`‘]$not_apos*['’])[^'‘’]*)*s) (\'[ ,;?\!:\"\(\)\*\#<>\[\]\%\/\\\=\+\«\»\½\&\`])/$1$2/) {
+    }
+  }
+
+  if ($lang eq "es") {
+    s/(^|\W)(de el|¦¦d¦¦D¦¦e el)(\W|$)/$1del$3/gi;
+    s/(^|\W)(a el|¦¦a¦¦A¦¦ el)(\W|$)/$1al$3/gi;
+  }
+
+  if ($lang eq "it") {
+    s/(^|\W)(a|d[ea]|su) il(\W|$)/$1$2l$3/gi;
+    s/(^|\W)in il(\W|$)/$1nel$2/gi;
+    s/(^|\W)(a|d[ea]|su) l'/$1$2ll'$2/gi;
+    s/(^|\W)in l'/$1nell'/gi;
+    s/(^|\W)(a|d[ea]|su) l([oae])(\W|$)/$1$2ll$3$4/gi;
+    s/(^|\W)in l([oae])(\W|$)/$1nell$2$3/gi;
+    s/(^|\W)(a|d[ea]|su) i(\W|$)/$1$2i$3/gi;
+    s/(^|\W)in i(\W|$)/$1nei$2/gi;
+    s/(^|\W)(a|d[ea]|su) gli(\W|$)/$1$2gli$3/gi;
+    s/(^|\W)in gli(\W|$)/$1negli$2/gi;
+  }
+
+  #  while (s/ " ([^"]+?) "/ "$1"/) {\}
+  s/^([^"]*) "([^"]*)$/$1$2/;
+
+  s/(^| )" ([^"]+?) "/$1"$2"/g;
+  s/[,;:\/\\\&\@\#]\s+\)/\)/g;
+  s/\(\s+[,;:\/\\\&\@\#]/\(/g;
+
+  if ($lang =~ /^(ja|zh|tw)$/) {
+    s/([。・●]) /$1/g;
+    #    s/(?<=[^。;\?\!:,、…‥\.\s])\s*$/。/;
+    s/(?<![0-9a-zàáâäåßçèéêëìíîïòóôöøùúûüýÿąćčďęěĺľłńňŕřśšťůźżA-ZÀÁÂÄÅÆÇÈÉÊËÌÍÎÏÒÓÔÖØÙÚÛÜÝŸĄĆČĎĘĚĹĽŁŃŇŔŘŚŠŤŮŹŻ]) (?![0-9a-zàáâäåßçèéêëìíîïòóôöøùúûüýÿąćčďęěĺľłńňŕřśšťůźżA-ZÀÁÂÄÅÆÇÈÉÊËÌÍÎÏÒÓÔÖØÙÚÛÜÝŸĄĆČĎĘĚĹĽŁŃŇŔŘŚŠŤŮŹŻ])//g;
+  } elsif ($lang eq "hy") {
+    unless ($dont_insert_missing_full_stops) {
+      s/(?<=[^\.;\?\!:,—։՜\s])\s*$/։/;
+      s/—$/։/;
+    }
+  } elsif ($lang eq "km") {
+    s/​/ /g;
+    s/  +/ /g;
+    if (/\P{Latin}/) {
+      s/(?<=[^។៕៚!\?\.])\s*$/។/;
+      s/ ([។៕៚])/$1/g;
+      s/ ?៖ ?/៖/g;
+    } else {
+      unless ($dont_insert_missing_full_stops) {
+	s/(?<=[^\.;\?\!:,—\s])\s*$/./;
+	s/—$/./;
+	s/([;:]-?[\(\)D\|])\.$/$1/;
+      }
+      s/etc\.\.\s*$/etc\./;
+    }
+  } elsif ($lang eq "th") {
+  } else {
+    unless ($dont_insert_missing_full_stops) {
+      s/(?<=[^\.;\?\!:,—\s])\s*$/./;
+      s/—$/./;
+      s/([;:]-?[\(\)D\|])\.$/$1/;
+    }
+    s/etc\.\.\s*$/etc\./;
+  }
+
+  s/([\$€&£\#])\s*([0-9])/$1$2/g;
+  s/(^|\W)([A-ZÉ]+) \& ([A-ZÉ]+)(\W|$)/$1$2\&$3$4/g;
+  s/(^|\W)at \& t(\W|$)/$1AT\&T$2/gi;
+  s/(\d)\s*-\s*(\d)/$1-$2/g;
+  s/(?<=\W)([A-Z]+)\s*\&\s*([A-Z]+)(?=\W)/$1\&$2/g;
+
+  s/(\w-)\s+/$1/g;
+  s/^\s*-(?![\& ])/- /;
+
+  if (/[:;]\s*$/) {
+    $previous_line_ended_with_semicolon = 1;
+  } else {
+    $previous_line_ended_with_semicolon = 0;
+  }
+    print "$_\n";
+  $previous_line_was_par_bound = 0;
+
+}
+sub remove_diacritics {
+  my $s = shift || return "";
+  $s =~ s/[áàâäąãăå]/a/g;
+  $s =~ s/[ćčç]/c/g;
+  $s =~ s/[ď]/d/g;
+  $s =~ s/[éèêëęě]/e/g;
+  $s =~ s/[ğ]/g/g;
+  $s =~ s/[ìíîĩĭıï]/i/g;
+  $s =~ s/[ĺľł]/l/g;
+  $s =~ s/[ńñň]/n/g;
+  $s =~ s/[òóôõöø]/o/g;
+  $s =~ s/[ŕř]/r/g;
+  $s =~ s/[śšş]/s/g;
+  $s =~ s/[ťţ]/t/g;
+  $s =~ s/[ùúûũüǔ]/u/g;
+  $s =~ s/[ỳýŷÿ]/y/g;
+  $s =~ s/[źẑżž]/z/g;
+  return $s;
+}
+
