@@ -21,6 +21,7 @@ HF_ORGANIZATION = "ThomasNLG"
 class QuestEval:
     def __init__(
         self,
+        fill_mask_model_name="yliu337/mt5_sliding_window_en",
         task: str = "text2text",
         language: str = "en",
         answer_types: Tuple = ('NER', 'NOUN'),
@@ -126,6 +127,7 @@ class QuestEval:
                 self.src_preproc_pipe = LinearizeWebnlgInput(spacy_pipeline=self.spacy_pipeline)
 
         logging.info("Loading the models, it can take time to download at first time.")
+        self.fill_mask_model_name = fill_mask_model_name
         self.models = self._load_all_models()
 
     def _load_all_models(self) -> Dict:
