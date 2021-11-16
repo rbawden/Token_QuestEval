@@ -263,6 +263,7 @@ class T5Model:
         eval_data=None,
         verbose=True,
         filename="",
+        continue_progress=False,
         **kwargs,
     ):
         """
@@ -462,6 +463,7 @@ class T5Model:
         early_stopping_counter = 0
         steps_trained_in_current_epoch = 0
         epochs_trained = 0
+        checkpoint_suffix = 0
 
         if args.model_name and os.path.exists(args.model_name):
             try:
@@ -471,14 +473,17 @@ class T5Model:
                     checkpoint_suffix = checkpoint_suffix[1]
                 else:
                     checkpoint_suffix = checkpoint_suffix[-1]
-                global_step = int(checkpoint_suffix)
-                epochs_trained = global_step // (
-                    len(train_dataloader) // args.gradient_accumulation_steps
-                )
-                steps_trained_in_current_epoch = global_step % (
-                    len(train_dataloader) // args.gradient_accumulation_steps
-                )
-
+                
+                # only pick up number of steps if continue_progress    
+                # RB hack
+                if continue_progress:
+                    global_step = int(checkpoint_suffix)
+                    epochs_trained = global_step // (
+                        len(train_dataloader) // args.gradient_accumulation_steps
+                    )
+                    steps_trained_in_current_epoch = global_step % (
+                        len(train_dataloader) // args.gradient_accumulation_steps
+                    )
 
                 logger.info(
                     "   Continuing training from checkpoint, will skip to saved global_step"
@@ -514,6 +519,7 @@ class T5Model:
             if epochs_trained > 0:
                 epochs_trained -= 1
                 continue
+                
             train_iterator.set_description(
                 f"Epoch {epoch_number + 1} of {args.num_train_epochs}"
             )
@@ -599,10 +605,15 @@ class T5Model:
 
                     if args.save_steps > 0 and global_step % args.save_steps == 0:
                         # Save model checkpoint
-                        output_dir_current = os.path.join(
-                            output_dir, "checkpoint-{}".format(global_step)
+                        # hacky change RB
+                        if continue_progress:
+                            output_dir_current = os.path.join(
+                                output_dir, "checkpoint-{}".format(global_step)
+                            )
+                        else:
+                            output_dir_current = os.path.join(
+                            output_dir, "checkpoint-{}".format(global_step + int(checkpoint_suffix))
                         )
-
                         self.save_model(
                             output_dir_current, optimizer, scheduler, model=model
                         )
@@ -624,9 +635,15 @@ class T5Model:
                                 "eval_{}".format(key), value, global_step
                             )
 
-                        output_dir_current = os.path.join(
-                            output_dir, "checkpoint-{}".format(global_step)
-                        )
+                        # hacky change - RB
+                        if continue_progress:
+                            output_dir_current = os.path.join(
+                                output_dir, "checkpoint-{}".format(global_step)
+                            )
+                        else:
+                            output_dir_current = os.path.join(
+                                output_dir, "checkpoint-{}".format(global_step + int(checkpoint_suffix))
+                            )
 
                         if args.save_eval_checkpoints:
                             self.save_model(
@@ -637,8 +654,10 @@ class T5Model:
                                 results=results,
                             )
 
-                        print(training_progress_scores)
-                        training_progress_scores["global_step"].append(global_step)
+                        if continue_progress:
+                            training_progress_scores["global_step"].append(global_step)
+                        else:
+                            training_progress_scores["global_step"].append(global_step + int(checkpoint_suffix))
                         training_progress_scores["train_loss"].append(current_loss)
                         for key in results:
                             training_progress_scores[key].append(results[key])
@@ -701,8 +720,8 @@ class T5Model:
                                             logger.info(" Training terminated.")
                                             train_iterator.close()
                                         return (
-                                            global_step,
-                                            tr_loss / global_step
+                                            global_step if continue_progress else global_step + int(checkpoint_suffix),
+                                            vtr_loss / global_step
                                             if not self.args.evaluate_during_training
                                             else training_progress_scores,
                                         )
@@ -745,7 +764,7 @@ class T5Model:
                                             logger.info(" Training terminated.")
                                             train_iterator.close()
                                         return (
-                                            global_step,
+                                            global_step if continue_progress else global_step + int(checkpoint_suffix),
                                             tr_loss / global_step
                                             if not self.args.evaluate_during_training
                                             else training_progress_scores,
@@ -753,9 +772,16 @@ class T5Model:
                         model.train()
 
             epoch_number += 1
-            output_dir_current = os.path.join(
-                output_dir, "checkpoint-{}-epoch-{}".format(global_step, epoch_number)
-            )
+
+            # hack change name of output dir
+            if continue_progress:
+                output_dir_current = os.path.join(
+                    output_dir, "checkpoint-{}".format(global_step)
+                )
+            else:
+                output_dir_current = os.path.join(
+                output_dir, "checkpoint-{}".format(global_step + int(checkpoint_suffix))
+            ) 
 
             if args.save_model_every_epoch or args.evaluate_during_training:
                 os.makedirs(output_dir_current, exist_ok=True)
@@ -777,7 +803,10 @@ class T5Model:
                         output_dir_current, optimizer, scheduler, results=results
                     )
 
-                training_progress_scores["global_step"].append(global_step)
+                if continue_progress:
+                    training_progress_scores["global_step"].append(global_step)
+                else:
+                    training_progress_scores["global_step"].append(global_step + int(checkpoint_suffix))
                 training_progress_scores["train_loss"].append(current_loss)
                 for key in results:
                     training_progress_scores[key].append(results[key])
@@ -838,7 +867,7 @@ class T5Model:
                                     logger.info(" Training terminated.")
                                     train_iterator.close()
                                 return (
-                                    global_step,
+                                    global_step if continue_progress else global_step + int(checkpoint_suffix),
                                     tr_loss / global_step
                                     if not self.args.evaluate_during_training
                                     else training_progress_scores,
@@ -882,14 +911,14 @@ class T5Model:
                                     logger.info(" Training terminated.")
                                     train_iterator.close()
                                 return (
-                                    global_step,
+                                    global_step if continue_progress else global_step + int(checkpoint_suffix),
                                     tr_loss / global_step
                                     if not self.args.evaluate_during_training
                                     else training_progress_scores,
                                 )
 
         return (
-            global_step,
+            global_step if continue_progress else global_step + int(checkpoint_suffix),
             tr_loss / global_step
             if not self.args.evaluate_during_training
             else training_progress_scores,
@@ -1189,8 +1218,6 @@ class T5Model:
             "train_loss": [],
             **extra_metrics,
         }
-
-        #print(kwargs)
         # load previous ones if there
         if 'training_progress_file' in kwargs and kwargs['training_progress_file'] not in [None, '']:
             logger.info('>> Loading previous training progress from %s', kwargs['training_progress_file'])

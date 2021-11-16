@@ -33,7 +33,7 @@ def train(data_filename, output_dir):
 
     # Configure the model
     model_args = T5Args()
-    model_args.num_train_epochs = 5
+    model_args.num_train_epochs = 1
     model_args.fp16 = False
     model_args.max_seq_length = 512
     model_args.learning_rate = 1e-5
@@ -72,8 +72,8 @@ def train(data_filename, output_dir):
     # Train the model
     os.sys.stderr.write('>> Fine-tuning with ' + data_filename + '\n')
     all_data = load_jsonl(data_filename)
-    train_data = all_data[:-5000]
-    eval_data = all_data[-5000:]
+    train_data = all_data[:-1000]
+    eval_data = all_data[-1000:]
     
     random.shuffle(train_data)
     random.shuffle(eval_data)	
