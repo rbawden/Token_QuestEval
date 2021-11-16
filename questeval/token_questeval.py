@@ -1,4 +1,5 @@
 from typing import List, Tuple, Dict, Callable
+from transformers import XLMRobertaTokenizer, XLMRobertaModel
 import os
 import json
 import numpy as np
@@ -18,27 +19,82 @@ from questeval.utils import (
     text2hash
 )
 
+
 HF_ORGANIZATION = "ThomasNLG"
+
+class Weighter(torch.nn.Module):
+    def __init__(self):
+        super(Weighter, self).__init__()
+        self.linear = torch.nn.Linear(768, 1, bias=False)
+        self.softmax_fct = torch.nn.Softmax(dim=-2)
+
+    def forward(self, word_embeddings, scores):
+        weights = self.linear(word_embeddings)
+        weights = self.softmax_fct(weights)
+        weighted_scores = torch.mul(weights, scores.T)
+        total_score = weighted_scores.sum()
+        return total_score
+
+    def preprocess(self, hyp_text, src_text, weight_tokenizer, weight_lang_model):
+        merged = src_text + ' <sep> ' + hyp_text
+
+        src_index = weight_tokenizer(src_text.split(), return_tensors="pt", padding=True)['input_ids']
+        hyp_index = weight_tokenizer(hyp_text.split(), return_tensors="pt", padding=True)['input_ids']
+        merged_index = weight_tokenizer(merged, return_tensors="pt")
+
+        list_merged_index = [i.item() for i in merged_index['input_ids'][0]]
+        list_first_index_src = [i[1].item() for i in src_index]
+        list_first_index_hyp = [i[1].item() for i in hyp_index]
+
+        outputs = weight_lang_model(**merged_index)
+
+        last_hidden_states = outputs.last_hidden_state
+        word_embeddings = last_hidden_states[0]
+
+        final_embedding_list = []
+        counter = 0
+
+        for i in list_first_index_src:
+            while list_merged_index[counter] != i:
+                counter += 1
+            final_embedding_list.append(word_embeddings[counter])
+
+        for i in list_first_index_hyp:
+            while list_merged_index[counter] != i:
+                counter += 1
+            final_embedding_list.append(word_embeddings[counter])
+
+        return torch.stack(final_embedding_list)
+
+    def compute_weights(self, hyp_text, src_text, weight_tokenizer, weight_lang_model):
+        with torch.no_grad():
+            word_embeddings = self.preprocess(hyp_text, src_text, weight_tokenizer, weight_lang_model)
+            weights = self.linear(word_embeddings)
+        return weights
+
 class Token_QuestEval(QuestEval):
     def __init__(
             self,
             task: str = "text2text",
             language: str = "en",
+            fill_mask_model_name: str = "yliu337/mt5_sliding_window_en",
             answer_types: Tuple = ('TOKEN',),
-            list_scores: Tuple = ('f1', 'bartscore',),
+            list_scores: Tuple = ('f1',),
             doc_types: Tuple = ('mask_src', 'mask_hyp'),
+            do_new_weighter: bool = False,
             sliding_window_size: int = 24,
             src_preproc_pipe=None,
             do_weighter: bool = False,
             do_consistency: bool = False,
-            qg_batch_size: int = 48,
-            clf_batch_size: int = 48,
+            qg_batch_size: int = 24,
+            clf_batch_size: int = 24,
             limit_sent: int = 5,
             reduction_multi_refs: Callable = max,
             no_cuda: bool = False,
             use_cache: bool = True
     ) -> None:
         super().__init__(
+            fill_mask_model_name,
             task,
             language,
             answer_types,
@@ -56,6 +112,16 @@ class Token_QuestEval(QuestEval):
         self.doc_types = doc_types
         self.sliding_window_size = sliding_window_size
         self.bartscore = 'bartscore' in list_scores
+
+        #Weighter initialization
+
+        self.do_new_weighter = do_new_weighter
+        if self.do_new_weighter:
+            self.weight_tokenizer = XLMRobertaTokenizer.from_pretrained('xlm-roberta-base')
+            self.weight_lang_model = XLMRobertaModel.from_pretrained('xlm-roberta-base')
+            self.weighter = Weighter()
+            self.weighter.load_state_dict(torch.load('/home/mila/y/yu-lu.liu/Token_QuestEval/questeval/model4.pt'))
+            self.weighter.eval()
 
         #Below are obsolete attributes to be deleted along with some parts of the codes
         self.filter_answ = False
@@ -116,12 +182,21 @@ class Token_QuestEval(QuestEval):
         return scores
 
     ## Load and define finetuned language model to be used ########################################################
+    def _get_qg_hash(self, type_log: str) -> str:
+        model = self.models[type_log]['QG']
+        if type(model) == str:
+            msg = f'QG_hash={model}'
+        else:
+            msg = f'QG_hash={model.pretrained_model_name_or_path}'
+
+        return msg
+
     def _load_all_models(self) -> Dict:
         # Textual hypothesis
         models = {"hyp": {}}
         if self.language == 'en':
-            models['hyp']['QA'] = f'yliu337/sliding_window_token_both_ctx'
-            models['hyp']['QG'] = f'{HF_ORGANIZATION}/t5-qg_squad1-en'
+            models['hyp']['QA'] = self.fill_mask_model_name
+            models['hyp']['QG'] = "sliding window method"
         else:
             raise ("Multilingual evaluation not handled yet.")
 
@@ -129,14 +204,11 @@ class Token_QuestEval(QuestEval):
         if self.task == "data2text":
             models['src'] = dict()
             models['src']['QA'] = f'{HF_ORGANIZATION}/t5-qa_webnlg_synth-en'
-            models['src']['QG'] = f'{HF_ORGANIZATION}/t5-qg_webnlg_synth-en'
+            models['src']['QG'] = "sliding window method"
 
-        # Loading all the different models
+        # Only loading the "QA" models
         for modality in models.keys():
-            for task in models[modality].keys():
-                if not type(models[modality][task]) == str:
-                    continue
-                models[modality][task] = self.get_model(model_name=models[modality][task])
+            models[modality]['QA'] = self.get_model(model_name=models[modality]['QA'])
 
         # Loading the weighter
         models['Weighter'] = None
@@ -153,7 +225,7 @@ class Token_QuestEval(QuestEval):
         return models
 
     def get_model(self, model_name: str, ):
-        keep_score_idx = None
+        keep_score_idx = 0
 
         if True:  # 't5' in model_name.lower():
             if 'yliu337' in model_name.lower():
@@ -394,6 +466,41 @@ class Token_QuestEval(QuestEval):
         return len(to_do_exs) != 0
 
     ## Compute scores from logs ##############################################################################
+    def _get_weights(
+            self,
+            questioned_log: List[Dict],
+            compared_log: List[Dict],
+    ) -> List[float]:
+
+        compared_labels = [a['text'] for answer_type in self._get_answer_types(compared_log['type'])
+                         for a in compared_log['self'][answer_type]['answers']]
+        compared_text = ' '.join(compared_labels)
+
+        questioned_labels = [a['text'] for answer_type in self._get_answer_types(questioned_log['type'])
+                           for a in questioned_log['self'][answer_type]['answers']]
+        questioned_text = ' '.join(questioned_labels)
+
+        if questioned_log['type'] == 'hyp':
+            hyp_text = questioned_text
+            src_text = compared_text
+        else:
+            hyp_text = compared_text
+            src_text = questioned_text
+
+        weights = self.weighter.compute_weights(hyp_text=hyp_text,
+                                                src_text=src_text,
+                                                weight_tokenizer=self.weight_tokenizer,
+                                                weight_lang_model=self.weight_lang_model)
+
+        if questioned_log['type'] == 'hyp':
+            weights = torch.tensor(list(weights.flatten())[:len(compared_labels)])
+        else:
+            weights = torch.tensor(list(weights.flatten())[-len(compared_labels):])
+
+        weights = [i.item() for i in list(torch.softmax(weights, -1))]
+
+        return weights
+
     def _calculate_score_from_logs(
         self,
         hyp_log: List[Dict],
@@ -466,6 +573,7 @@ class Token_QuestEval(QuestEval):
         questioned_log: Dict,
         compared_log: Dict
     ) -> float:
+
         regularizer = lambda list_score, list_reg: np.multiply(scores, list_reg).tolist()
         list_borned = lambda a_list: [max(min(1, x), 0) for x in a_list]
 
@@ -479,6 +587,8 @@ class Token_QuestEval(QuestEval):
                 w for answer_type in self._get_answer_types(questioned_log['type'])
                 for w in compared_log['self'][answer_type][name_model_qg][name_model_weighter]
             ]
+        if self.do_new_weighter:
+            weights = self._get_weights(questioned_log, compared_log)
 
         list_scores = []
         for type_score in self.list_scores:
@@ -499,10 +609,16 @@ class Token_QuestEval(QuestEval):
                 assert weighter_probs is not None, "weighter_probs is None. Please compute the weighter probs with do_weighter activate."
                 scores = regularizer(scores, weighter_probs)
 
+            if self.do_new_weighter:
+                scores = regularizer(scores, weights)
+
             list_scores += scores
 
-        final_score = np.average(list_scores)
-        assert 0 <= final_score <= 1, "score should be in [0-1] "
+        if self.do_new_weighter:
+            final_score = np.sum(list_scores)
+        else:
+            final_score = np.average(list_scores)
+        #assert 0 <= final_score <= 1, "score should be in [0-1] "
         return final_score
 
     def _compute_answer_similarity_scores(
