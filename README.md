@@ -181,3 +181,22 @@ The main method of this step is `_calculate_score_from_logs` at [line 397 ](http
     - For each masked segment, take the F1 score. This is done by `_get_scores` on [line 419](https://github.com/YuLuLiu/Token_QuestEval/blob/main/questeval/token_questeval.py#L419)
     - The final metric score for this pair of source & hypothesis is an average of the F1 scores at [line 504](https://github.com/YuLuLiu/Token_QuestEval/blob/main/questeval/token_questeval.py#L504)
 If `self.doc_types = ('mask_src', 'mask_hyp')`, a final average is taken at [line 415](https://github.com/YuLuLiu/Token_QuestEval/blob/main/questeval/token_questeval.py#L415) between what we get at step 3 for **mask_src** and for **mask_hyp**.
+
+    
+# MT evaluation pipeline
+    
+## Download and prepare data
+(same json format as above)
+    
+Download data: TODO
+    
+Prepare examples: TODO
+    
+## Fine-tune T5 model
+    
+TODO
+    
+## Predict scores on WMT metrics data
+    
+    
+TODO
