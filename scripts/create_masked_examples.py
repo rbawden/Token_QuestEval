@@ -57,6 +57,11 @@ if __name__ == "__main__":
             continue
         h, s = line.strip().split('\t')
         h, s = s.strip(), h.strip()
+
+        # maximum number of tokens = 150
+        if len(h.split()) > 100 or len(s.split()) > 100:
+            continue
         json_record = json.dumps({'id': i, 'context': '', 'qas': get_qas(h, s, padding_size=0)}, ensure_ascii=False)
         print(json_record)
+        i += 1
 
