@@ -188,9 +188,12 @@ If `self.doc_types = ('mask_src', 'mask_hyp')`, a final average is taken at [lin
 ## Download and prepare data
 (same json format as above)
     
-Download data: TODO
+Download data and prepare examples:
+
+```
+bash scripts/download_data.sh
+```
     
-Prepare examples: TODO
     
 ## Fine-tune T5 model
     
