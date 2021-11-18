@@ -188,16 +188,46 @@ If `self.doc_types = ('mask_src', 'mask_hyp')`, a final average is taken at [lin
 ## Download and prepare data
 (same json format as above)
     
-Download data and prepare examples:
+Download data and prepare training examples:
 
 ```
-bash scripts/download_data.sh
+bash scripts/download_data.sh # downloads paraphrase data and MT data
+bash scripts/create_paraphrase_data.sh # create paraphrase examples
+bash scripts/create_mt_data.sh # create MT examples
 ```
+    
+Training files are:
+
+- `data/paraphrase/parabank{1,2}-parts/*` (in several parts because there is a lot more data)
+- `data/metrics/wmt14-18-intoEnglish-all.hyp-ref.masked-examples.jsonl`
     
     
 ## Fine-tune T5 model
     
-TODO
+Fine-tune on parabank1 data:
+```
+for i in {0..171}; do
+    python -u scripts/finetune_t5.py data/paraphrase/parabank1-parts/parabank1.threshold0.7.detok.masked-examples.jsonl.part-$i \
+                    --output_dir models/train_t5_parabank1/ 2>> models/train_t5_parabank1/train.log
+done
+```
+(or use arrays of jobs in slurm)
+    
+Fine-tune on parabank2 data:
+```
+for i in {0..77}; do
+    python -u scripts/finetune_t5.py data/paraphrase/parabank2-parts/parabank2.masked-examples.jsonl.part-$i \
+                    --output_dir models/train_t5_parabank2/ 2>> models/train_t5_parabank2/train.log
+done
+```
+(or use arrays of jobs in slurm)
+
+Fine-tune on metrics data:
+```
+python scripts/finetune_t5.py data/metrics/wmt14-18-intoEnglish-all.hyp-ref.masked-examples.jsonl \
+                   --epochs 5 \
+                   --output_dir models/train_t5_metrics/ 2>> models/train_t5_metrics/train.log
+```
     
 ## Predict scores on WMT metrics data
     
