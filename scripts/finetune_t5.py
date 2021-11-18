@@ -75,11 +75,12 @@ def train(data_filename, output_dir, nepochs=1, bsz=8, evalsteps=5000, savesteps
     # Train the model
     os.sys.stderr.write('>> Fine-tuning with ' + data_filename + '\n')
     all_data = load_jsonl(data_filename)
+    random.shuffle(all_data)
     train_data = all_data[:-valsize]
     eval_data = all_data[-valsize:]
     
-    random.shuffle(train_data)
-    random.shuffle(eval_data)	
+    #random.shuffle(train_data)
+    #random.shuffle(eval_data)	
     
     model_args.filename = data_filename.split('/')[-1]
     model.train_model(train_data, eval_data=eval_data, filename=model_args.filename,

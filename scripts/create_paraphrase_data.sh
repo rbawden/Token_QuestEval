@@ -64,7 +64,7 @@ fi
 # split into different parts and rename for consistency Parabank 2
 if [ ! -f $maindir/data/paraphrase/parabank2-parts/parabank2.masked-examples.jsonl.part-1 ]; then
     echo "Splitting data into smaller parts: parabank.threshold0.7.detok.masked-examples.jsonl.part-{0,1,2...}..."
-    split -l 250000 -d -a 3 $maindir/data/paraphrase/parabank2.masked-examples.jsonl \
+    split -l 100000 -d -a 3 $maindir/data/paraphrase/parabank2.masked-examples.jsonl \
           $maindir/data/paraphrase/parabank2-parts/parabank2.masked-examples.jsonl.part-
     # rename for consistency
     for file in $maindir/data/paraphrase/parabank2-parts/*part-*; do
