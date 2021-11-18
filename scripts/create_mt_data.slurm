@@ -22,9 +22,4 @@ mosesdir=$tooldir/mosesdecoder
 eval "$(/gpfslocalsup/pub/anaconda-py3/2020.02/bin/conda shell.bash hook)"
 conda activate py38
 
-bash scripts/concatenate_wmt_data.sh.sh data/metrics/ | \
-    $mosesdir/scripts/tokenizer/normalize-punctuation.perl -l en | gzip > data/metrics/wmt14-18-intoEnglish-all.hyp-ref.tsv.gz
-
-zcat data/metrics/wmt14-18-intoEnglish-all.hyp-ref.tsv.gz | \
-    python -u scripts/create_masked_examples.py data/metrics/wmt14-18-intoEnglish-all.hyp-ref.tsv \
-	   > data/metrics/wmt14-18-intoEnglish-all.hyp-ref.masked-examples.jsonl
+bash scripts/create_mt_data_.sh

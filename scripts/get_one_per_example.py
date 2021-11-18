@@ -1,10 +1,9 @@
 #!/usr/bin/python
 import random
 import json
-#from mosestokenizer import MosesDetokenizer
+import os
 
-def process(full_dataset, meta_dataset):
-    #detok = MosesDetokenizer('en')
+def process_version1(full_dataset, meta_dataset):
     with open(full_dataset) as fp, open(meta_dataset) as dfp:
         for line, meta_str in zip(fp, dfp):
             examples = line.strip().split('\t')
@@ -24,7 +23,18 @@ def process(full_dataset, meta_dataset):
                 second = filtered[0]
                 print('\t'.join([first, second]))
             
-
+def process_version2(full_dataset):
+    with open(full_dataset) as fp:
+        for line in fp:
+            line_tab = line.strip().split('\t')
+            if len(line_tab) < 3:
+                continue
+            score, first = line_tab[0], line_tab[1]
+            examples = line_tab[2:]
+            # take a random example
+            random.shuffle(examples)
+            second = examples[0]
+            print('\t'.join([first, second]))
 
 if __name__ == '__main__':
 
@@ -32,6 +42,10 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('full_dataset')
     parser.add_argument('meta_scores')
+    parser.add_argument('version', choices=(1, 2), type=int)
     args = parser.parse_args()
 
-    process(args.full_dataset, args.meta_scores)
+    if args.version == 1:
+        process_version1(args.full_dataset, args.meta_scores)
+    else:
+        process_version2(args.full_dataset)
