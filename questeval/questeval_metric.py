@@ -200,12 +200,14 @@ class QuestEval:
                 batch_sources = sources[ex_idx:ex_idx + batch_size]
             if having_references:
                 batch_list_references = list_references[ex_idx:ex_idx + batch_size]
-            scores += self._batch_questeval(
+            score, hyps_log, compare_log = self._batch_questeval(
                 hypothesis=hypothesis[ex_idx:ex_idx + batch_size],
                 sources=batch_sources,
                 list_references=batch_list_references,
             )
+            scores += score
 
+        print(hyps_log)
         result = {'corpus_score': np.average(scores), 'ex_level_scores': scores}
         return result
 
@@ -221,7 +223,7 @@ class QuestEval:
 
         # Hypothesis
         hyp_logs, hyp_hashes, modified_logs = self._texts2logs(hypothesis, type_logs='hyp', d_loaded_logs=d_loaded_logs)
-        if modified_logs:
+        if modified_logs and use_cache: # RB modif
             self._serialize_logs(hyp_logs, hyp_hashes)
 
         # Source
@@ -233,7 +235,7 @@ class QuestEval:
             # Compute the similarity scores
             modified_logs = max(self._compute_answer_similarity_scores(src_logs, type_logs='src'), modified_logs)
             # Serialise logs
-            if modified_logs:
+            if modified_logs and use_cache: # RB modif
                 self._serialize_logs(src_logs, src_hashes)
                 self._serialize_logs(hyp_logs, hyp_hashes)
             list_compared_logs.append(src_logs)
@@ -252,7 +254,7 @@ class QuestEval:
                 # Compute the similarity scores
                 modified_logs = max(self._compute_answer_similarity_scores(ref_logs, type_logs='ref'), modified_logs)
                 # Serialise logs
-                if modified_logs:
+                if modified_logs and use_cache: # modified RB
                     self._serialize_logs(ref_logs, ref_hashes)
                     self._serialize_logs(hyp_logs, hyp_hashes)
                 list_compared_logs.append(ref_logs)
@@ -260,7 +262,7 @@ class QuestEval:
         # Compute the similarity scores for hyp
         modified_logs = self._compute_answer_similarity_scores(hyp_logs, type_logs='hyp')
         # Serialise hyp logs
-        if modified_logs:
+        if modified_logs and use_cache: # RB modif
             self._serialize_logs(hyp_logs, hyp_hashes)
 
         list_compared_logs = [
@@ -276,7 +278,7 @@ class QuestEval:
         for hyps_log, compared_logs in zip(hyp_logs, list_compared_logs):
             scores.append(self._calculate_score_from_logs(hyps_log, compared_logs))
 
-        return scores
+        return scores, hyps_log, compared_logs # RB modif
 
     def _texts2logs(
         self,
