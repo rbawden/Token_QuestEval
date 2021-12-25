@@ -4,78 +4,36 @@ import json
 import spacy
 from spacy.cli import download
 import random
+import math
 from datasets import load_dataset
 
-
-def get_masked_sequences(article, highlights):
-      examples = []
-      article_tokens = article.split()[:250]
-      highlights_tokens = highlights.split()
-      tokens = article_tokens + ['<sep>'] + highlights_tokens
-
-      for i in range(len(tokens)):
-          if tokens[i] != '<sep>':
-              label = tokens[i]
-              masked = ' '.join(tokens[0:i]) + ' <mask> ' + ' '.join(tokens[i + 1:])
-              pair = {'answer': label, 'question': masked}
-              examples.append(pair)
-
-      random_indices = random.sample(range(len(examples)), min(10, len(examples)))
-      output_examples = []
-      for i in random_indices:
-          output_examples.append(examples[i])
-
-      return output_examples
-
-def split_on_punct(doc):
-    start = 0
-    seen_period = False
-    start_idx = 0
-    for i, token in enumerate(doc):
-        if seen_period and not token.is_punct:
-            yield doc[start: token.i].text, (start_idx, token.idx)
-            start = token.i
-            start_idx = token.idx
-            seen_period = False
-        elif token.text in [".", "!", "?"]:
-            seen_period = True
-    if start < len(doc):
-        yield doc[start: len(doc)].text, (start_idx, len(doc.text))
-
-
-def sentencize(
-    text: str, spacy_pipeline
-):
-    preprocessed_context = spacy_pipeline(text)
-    return [sentence_tuple[0] for sentence_tuple in split_on_punct(preprocessed_context)]
-
 def main():
-    # get the sentence splitter
-    download('en_core_web_sm')
-    spacy_pipeline = spacy.load('en_core_web_sm')
+    # define language
+    language = "en"
 
     #get the dataset
+    #dataset = load_dataset('mlsum', language)
     dataset = load_dataset('cnn_dailymail', '3.0.0')
-    train_dataset = dataset['train']
+    dataset = dataset["train"]
 
-    MAX = 5000
-    counter = 0
-    
     #writing new dataset
-    with open("weight_cnn_token.jsonl", mode='w', encoding='utf-8') as outfile:
-        for e in train_dataset:
-            counter = counter + 1
-            highlights = e['highlights']
-            article = e['article']
+    MAX_per_doc = 10000
+    nb_docs = math.ceil(len(dataset)/MAX_per_doc)
+    counter = 0
 
-            qas = get_masked_sequences(article, highlights)
+    for i in range(nb_docs):
+        filename = "QA_data/summ_train_data.jsonl-{language}-{doc_nb}".format(language=language, doc_nb=i)
+        with open(filename, mode='w', encoding='utf-8') as outfile:
+            data_subset = dataset[(i * MAX_per_doc):((i + 1) * MAX_per_doc)]
+            for k in range(MAX_per_doc):
+                id = language + "_" + str(counter)
+                hypothesis = data_subset['highlights'][k]
+                reference = data_subset['article'][k]
 
-            json_record = json.dumps({'id': counter, 'context': ' ', 'qas': qas}, ensure_ascii=False)
-            outfile.write(json_record + '\n')
-
-            if counter > MAX:
-                break
-
+                json_record = json.dumps({'id': id, 'hypothesis': hypothesis, 'reference': reference,
+                                          'hyp_lang': language, 'ref_lang': language}, ensure_ascii=False)
+                outfile.write(json_record + '\n')
+                counter = counter + 1
 
 if __name__ == "__main__":
     main()

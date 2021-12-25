@@ -17,7 +17,7 @@ from torch.nn.utils.rnn import pad_sequence
 from torch.utils.data import DataLoader, Dataset, RandomSampler, SequentialSampler
 from torch.utils.data.distributed import DistributedSampler
 from tqdm.auto import tqdm, trange
-from transformers.models.t5 import T5Config, T5ForConditionalGeneration, T5Tokenizer
+from transformers.models.t5 import T5Config, T5ForConditionalGeneration, T5TokenizerFast
 from transformers.optimization import (
     get_constant_schedule,
     get_constant_schedule_with_warmup,
@@ -27,7 +27,7 @@ from transformers.optimization import (
     get_polynomial_decay_schedule_with_warmup,
 )
 from transformers.optimization import AdamW, Adafactor
-from transformers.models.mt5 import MT5Config, MT5ForConditionalGeneration
+from transformers.models.mt5 import MT5Config, MT5ForConditionalGeneration, MT5TokenizerFast
 
 from simpletransformers.config.global_args import global_args
 from simpletransformers.config.model_args import T5Args
@@ -36,12 +36,12 @@ from simpletransformers.t5.t5_utils import T5Dataset, load_hf_dataset, preproces
 
 
 def print_memory():
-
     t = torch.cuda.get_device_properties(0).total_memory
     r = torch.cuda.memory_reserved(0)
     a = torch.cuda.memory_allocated(0)
-    f = r-a  # free inside reserved                                                                                                           
+    f = r - a  # free inside reserved
     logging.info('Memory: %s reserved, %s allocated, %s free', r, a, f)
+
 
 try:
     import wandb
@@ -56,30 +56,30 @@ logger = logging.getLogger(__name__)
 def chunks(lst, n):
     """Yield successive n-sized chunks from lst."""
     for i in range(0, len(lst), n):
-        yield lst[i : i + n]
+        yield lst[i: i + n]
 
 
 MODEL_CLASSES = {
-    "t5": (T5Config, T5ForConditionalGeneration),
-    "mt5": (MT5Config, MT5ForConditionalGeneration),
+    "t5": (T5Config, T5ForConditionalGeneration, T5TokenizerFast),
+    "mt5": (MT5Config, MT5ForConditionalGeneration, MT5TokenizerFast),
 }
 
 
 class T5Model:
     def __init__(
-        self,
-        model_type,
-        model_name,
-        args=None,
-        tokenizer=None,
-        use_cuda=True,
-        cuda_device=-1,
-        **kwargs,
+            self,
+            model_type,
+            model_name,
+            sliding_window_size = 24,
+            args=None,
+            tokenizer=None,
+            use_cuda=True,
+            cuda_device=-1,
+            **kwargs,
     ):
 
         """
         Initializes a T5Model model.
-
         Args:
             model_type: The type of model (t5, mt5)
             model_name: The exact architecture and trained weights to use. This may be a Hugging Face Transformers compatible pre-trained model, a community model, or the path to a directory containing model files.
@@ -88,7 +88,6 @@ class T5Model:
             cuda_device (optional): Specific GPU that should be used. Will use the first available GPU by default.
             **kwargs (optional): For providing proxies, force_download, resume_download, cache_dir and other options specific to the 'from_pretrained' implementation where this will be supplied.
         """  # noqa: ignore flake8"
-
         self.args = self._load_model_args(model_name)
 
         if isinstance(args, dict):
@@ -127,7 +126,7 @@ class T5Model:
 
         self.results = {}
 
-        config_class, model_class = MODEL_CLASSES[model_type]
+        config_class, model_class, model_tokenizer = MODEL_CLASSES[model_type]
 
         if model_name is None:
             self.config = self.args.config
@@ -136,11 +135,11 @@ class T5Model:
             self.config = config_class.from_pretrained(model_name, **self.args.config)
             self.model = model_class.from_pretrained(model_name, config=self.config)
 
-        if isinstance(tokenizer, T5Tokenizer):
+        if isinstance(tokenizer, model_tokenizer):
             self.tokenizer = tokenizer
             self.model.resize_token_embeddings(len(self.tokenizer))
         else:
-            self.tokenizer = T5Tokenizer.from_pretrained(model_name, truncate=True)
+            self.tokenizer = model_tokenizer.from_pretrained(model_name, truncate=True)
 
         if self.args.dynamic_quantize:
             self.model = torch.quantization.quantize_dynamic(
@@ -167,21 +166,21 @@ class T5Model:
                 "wandb_project specified but wandb is not available. Wandb disabled."
             )
             self.args.wandb_project = None
+        self.args.sliding_window_size = sliding_window_size
 
     def train_model(
-        self,
-        train_data,
-        output_dir=None,
-        show_running_loss=True,
-        args=None,
-        eval_data=None,
-        verbose=True,
-        filename="",
-        **kwargs,
+            self,
+            train_data,
+            output_dir=None,
+            show_running_loss=True,
+            args=None,
+            eval_data=None,
+            verbose=True,
+            filename="",
+            **kwargs,
     ):
         """
         Trains the model using 'train_data'
-
         Args:
             train_data: Pandas DataFrame containing the 3 columns - `prefix`, `input_text`, `target_text`.
                         - `prefix`: A string indicating the task to perform. (E.g. `"question"`, `"stsb"`)
@@ -194,7 +193,6 @@ class T5Model:
             **kwargs: Additional metrics that should be used. Pass in the metrics as keyword arguments (name of metric: function to use).
                         A metric function should take in two parameters. The first parameter will be the true labels, and the second parameter will be the predictions. Both inputs
                         will be lists of strings. Note that this will slow down training significantly as the predicted sequences need to be generated.
-
         Returns:
             global_step: Number of global steps trained
             training_details: Average training loss if evaluate_during_training is False or full training progress scores if evaluate_during_training is True
@@ -216,9 +214,9 @@ class T5Model:
             output_dir = self.args.output_dir
 
         if (
-            os.path.exists(output_dir)
-            and os.listdir(output_dir)
-            and not self.args.overwrite_output_dir
+                os.path.exists(output_dir)
+                and os.listdir(output_dir)
+                and not self.args.overwrite_output_dir
         ):
             raise ValueError(
                 "Output directory ({}) already exists and is not empty."
@@ -233,7 +231,7 @@ class T5Model:
 
         logger.info("moved model to device")
         print_memory()
-        
+
         global_step, training_details = self.train(
             train_dataset,
             output_dir,
@@ -256,19 +254,18 @@ class T5Model:
         return global_step, training_details
 
     def train(
-        self,
-        train_dataset,
-        output_dir,
-        show_running_loss=True,
-        eval_data=None,
-        verbose=True,
-        filename="",
-        continue_progress=False,
-        **kwargs,
+            self,
+            train_dataset,
+            output_dir,
+            show_running_loss=True,
+            eval_data=None,
+            verbose=True,
+            filename="",
+            continue_progress=False,
+            **kwargs,
     ):
         """
         Trains the model on train_dataset.
-
         Utility function to be used by the train_model() method. Not intended to be used directly.
         """
 
@@ -288,15 +285,15 @@ class T5Model:
         if args.max_steps > 0:
             t_total = args.max_steps
             args.num_train_epochs = (
-                args.max_steps
-                // (len(train_dataloader) // args.gradient_accumulation_steps)
-                + 1
+                    args.max_steps
+                    // (len(train_dataloader) // args.gradient_accumulation_steps)
+                    + 1
             )
         else:
             t_total = (
-                len(train_dataloader)
-                // args.gradient_accumulation_steps
-                * args.num_train_epochs
+                    len(train_dataloader)
+                    // args.gradient_accumulation_steps
+                    * args.num_train_epochs
             )
 
         no_decay = ["bias", "LayerNorm.weight"]
@@ -341,7 +338,7 @@ class T5Model:
                             p
                             for n, p in model.named_parameters()
                             if n not in custom_parameter_names
-                            and not any(nd in n for nd in no_decay)
+                               and not any(nd in n for nd in no_decay)
                         ],
                         "weight_decay": args.weight_decay,
                     },
@@ -350,7 +347,7 @@ class T5Model:
                             p
                             for n, p in model.named_parameters()
                             if n not in custom_parameter_names
-                            and any(nd in n for nd in no_decay)
+                               and any(nd in n for nd in no_decay)
                         ],
                         "weight_decay": 0.0,
                     },
@@ -433,9 +430,9 @@ class T5Model:
             raise ValueError("{} is not a valid scheduler.".format(args.scheduler))
 
         if (
-            args.model_name
-            and os.path.isfile(os.path.join(args.model_name, "optimizer.pt"))
-            and os.path.isfile(os.path.join(args.model_name, "scheduler.pt"))
+                args.model_name
+                and os.path.isfile(os.path.join(args.model_name, "optimizer.pt"))
+                and os.path.isfile(os.path.join(args.model_name, "scheduler.pt"))
         ):
             # Load in optimizer and scheduler states
             optimizer.load_state_dict(
@@ -473,16 +470,16 @@ class T5Model:
                     checkpoint_suffix = checkpoint_suffix[1]
                 else:
                     checkpoint_suffix = checkpoint_suffix[-1]
-                
-                # only pick up number of steps if continue_progress    
+
+                # only pick up number of steps if continue_progress
                 # RB hack
                 if continue_progress:
                     global_step = int(checkpoint_suffix)
                     epochs_trained = global_step // (
-                        len(train_dataloader) // args.gradient_accumulation_steps
+                            len(train_dataloader) // args.gradient_accumulation_steps
                     )
                     steps_trained_in_current_epoch = global_step % (
-                        len(train_dataloader) // args.gradient_accumulation_steps
+                            len(train_dataloader) // args.gradient_accumulation_steps
                     )
 
                 logger.info(
@@ -519,7 +516,7 @@ class T5Model:
             if epochs_trained > 0:
                 epochs_trained -= 1
                 continue
-                
+
             train_iterator.set_description(
                 f"Epoch {epoch_number + 1} of {args.num_train_epochs}"
             )
@@ -612,15 +609,15 @@ class T5Model:
                             )
                         else:
                             output_dir_current = os.path.join(
-                            output_dir, "checkpoint-{}".format(global_step + int(checkpoint_suffix))
-                        )
+                                output_dir, "checkpoint-{}".format(global_step + int(checkpoint_suffix))
+                            )
                         self.save_model(
                             output_dir_current, optimizer, scheduler, model=model
                         )
 
                     if args.evaluate_during_training and (
-                        args.evaluate_during_training_steps > 0
-                        and global_step % args.evaluate_during_training_steps == 0
+                            args.evaluate_during_training_steps > 0
+                            and global_step % args.evaluate_during_training_steps == 0
                     ):
                         # Only evaluate when single GPU otherwise metrics may not average well
                         results = self.eval_model(
@@ -683,8 +680,8 @@ class T5Model:
                             )
                         if best_eval_metric and args.early_stopping_metric_minimize:
                             if (
-                                results[args.early_stopping_metric] - best_eval_metric
-                                < args.early_stopping_delta
+                                    results[args.early_stopping_metric] - best_eval_metric
+                                    < args.early_stopping_delta
                             ):
                                 best_eval_metric = results[args.early_stopping_metric]
                                 self.save_model(
@@ -698,8 +695,8 @@ class T5Model:
                             else:
                                 if args.use_early_stopping:
                                     if (
-                                        early_stopping_counter
-                                        < args.early_stopping_patience
+                                            early_stopping_counter
+                                            < args.early_stopping_patience
                                     ):
                                         early_stopping_counter += 1
                                         if verbose:
@@ -727,8 +724,8 @@ class T5Model:
                                         )
                         else:
                             if (
-                                results[args.early_stopping_metric] - best_eval_metric
-                                > args.early_stopping_delta
+                                    results[args.early_stopping_metric] - best_eval_metric
+                                    > args.early_stopping_delta
                             ):
                                 best_eval_metric = results[args.early_stopping_metric]
                                 self.save_model(
@@ -742,8 +739,8 @@ class T5Model:
                             else:
                                 if args.use_early_stopping:
                                     if (
-                                        early_stopping_counter
-                                        < args.early_stopping_patience
+                                            early_stopping_counter
+                                            < args.early_stopping_patience
                                     ):
                                         early_stopping_counter += 1
                                         if verbose:
@@ -780,8 +777,8 @@ class T5Model:
                 )
             else:
                 output_dir_current = os.path.join(
-                output_dir, "checkpoint-{}".format(global_step + int(checkpoint_suffix))
-            ) 
+                    output_dir, "checkpoint-{}".format(global_step + int(checkpoint_suffix))
+                )
 
             if args.save_model_every_epoch or args.evaluate_during_training:
                 os.makedirs(output_dir_current, exist_ok=True)
@@ -830,8 +827,8 @@ class T5Model:
                     )
                 if best_eval_metric and args.early_stopping_metric_minimize:
                     if (
-                        results[args.early_stopping_metric] - best_eval_metric
-                        < args.early_stopping_delta
+                            results[args.early_stopping_metric] - best_eval_metric
+                            < args.early_stopping_delta
                     ):
                         best_eval_metric = results[args.early_stopping_metric]
                         self.save_model(
@@ -844,8 +841,8 @@ class T5Model:
                         early_stopping_counter = 0
                     else:
                         if (
-                            args.use_early_stopping
-                            and args.early_stopping_consider_epochs
+                                args.use_early_stopping
+                                and args.early_stopping_consider_epochs
                         ):
                             if early_stopping_counter < args.early_stopping_patience:
                                 early_stopping_counter += 1
@@ -874,8 +871,8 @@ class T5Model:
                                 )
                 else:
                     if (
-                        results[args.early_stopping_metric] - best_eval_metric
-                        > args.early_stopping_delta
+                            results[args.early_stopping_metric] - best_eval_metric
+                            > args.early_stopping_delta
                     ):
                         best_eval_metric = results[args.early_stopping_metric]
                         self.save_model(
@@ -888,8 +885,8 @@ class T5Model:
                         early_stopping_counter = 0
                     else:
                         if (
-                            args.use_early_stopping
-                            and args.early_stopping_consider_epochs
+                                args.use_early_stopping
+                                and args.early_stopping_consider_epochs
                         ):
                             if early_stopping_counter < args.early_stopping_patience:
                                 early_stopping_counter += 1
@@ -929,7 +926,6 @@ class T5Model:
     ):
         """
         Evaluates the model on eval_data. Saves results to output_dir.
-
         Args:
             eval_data: Pandas DataFrame containing the 3 columns - `prefix`, `input_text`, `target_text`.
                         - `prefix`: A string indicating the task to perform. (E.g. `"question"`, `"stsb"`)
@@ -990,7 +986,6 @@ class T5Model:
     def evaluate(self, eval_dataset, output_dir, verbose=True, silent=False, **kwargs):
         """
         Evaluates the model on eval_dataset.
-
         Utility function to be used by the eval_model() method. Not intended to be used directly.
         """
 
@@ -1020,7 +1015,7 @@ class T5Model:
             from torch.cuda import amp
 
         for batch in tqdm(
-            eval_dataloader, disable=args.silent or silent, desc="Running Evaluation"
+                eval_dataloader, disable=args.silent or silent, desc="Running Evaluation"
         ):
             inputs = self._get_inputs_dict(batch)
             with torch.no_grad():
@@ -1050,10 +1045,8 @@ class T5Model:
     def predict(self, to_predict):
         """
         Performs predictions on a list of text.
-
         Args:
             to_predict: A python list of text (str) to be sent to the model for prediction. Note that the prefix should be prepended to the text.
-
         Returns:
             preds: A python list of the generated sequences.
         """  # noqa: ignore flake8"
@@ -1063,12 +1056,12 @@ class T5Model:
         all_outputs = []
         # Batching
         for batch in tqdm(
-            [
-                to_predict[i : i + self.args.eval_batch_size]
-                for i in range(0, len(to_predict), self.args.eval_batch_size)
-            ],
-            desc="Generating outputs",
-            disable=self.args.silent,
+                [
+                    to_predict[i: i + self.args.eval_batch_size]
+                    for i in range(0, len(to_predict), self.args.eval_batch_size)
+                ],
+                desc="Generating outputs",
+                disable=self.args.silent,
         ):
             input_batch = preprocess_for_pred(batch, self.tokenizer, self.args)
             input_ids = torch.tensor(input_batch["input_ids"])
@@ -1122,7 +1115,7 @@ class T5Model:
 
         if self.args.num_return_sequences > 1:
             return [
-                outputs[i : i + self.args.num_return_sequences]
+                outputs[i: i + self.args.num_return_sequences]
                 for i in range(0, len(outputs), self.args.num_return_sequences)
             ]
         else:
@@ -1138,14 +1131,12 @@ class T5Model:
     def compute_metrics(self, labels, preds, **kwargs):
         """
         Computes the evaluation metrics for the model predictions.
-
         Args:
             labels: List of target sequences
             preds: List of model generated outputs
             **kwargs: Custom metrics that should be used. Pass in the metrics as keyword arguments (name of metric: function to use).
                         A metric function should take in two parameters. The first parameter will be the true labels, and the second parameter will be the predictions. Both inputs
                         will be lists of strings. Note that this will slow down evaluation significantly as the predicted sequences need to be generated.
-
         Returns:
             result: Dictionary containing evaluation results.
         """  # noqa: ignore flake8"
@@ -1186,7 +1177,6 @@ class T5Model:
     ):
         """
         Creates a T5Dataset from data.
-
         Utility function for train() and eval() methods. Not intended to be used directly.
         """
 
@@ -1240,7 +1230,7 @@ class T5Model:
         return {metric: values[-1] for metric, values in metric_values.items()}
 
     def save_model(
-        self, output_dir=None, optimizer=None, scheduler=None, model=None, results=None
+            self, output_dir=None, optimizer=None, scheduler=None, model=None, results=None
     ):
         if not output_dir:
             output_dir = self.args.output_dir
