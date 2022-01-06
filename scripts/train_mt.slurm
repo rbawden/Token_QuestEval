@@ -12,7 +12,7 @@
 #SBATCH --time=20:00:00        # Temps d’exécution maximum demande (HH:MM:SS)
 #SBATCH --output=slurm_outputs/seg%x_%j_%a.out  # Nom du fichier de sortie contenant l'ID et l'indice
 #SBATCH --error=slurm_outputs/seg%x_%j_%a.out   # Nom du fichier d'erreur (ici commun avec la sortie)
-##SBATCH --array=0-85%1         # 6 travaux ayant les indices 0, 2, 4, 6, 8, et 10
+#SBATCH --array=0-10%1         # 6 travaux ayant les indices 0, 2, 4, 6, 8, et 10
 
 # go into the submission directory 
 cd ${SLURM_SUBMIT_DIR}
@@ -32,5 +32,5 @@ eval "$(/gpfslocalsup/pub/anaconda-py3/2020.02/bin/conda shell.bash hook)"
 conda activate py38
 
 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 \
-		    python -u scripts/finetune_t5.py --epochs 5 data/metrics/wmt14-18-intoEnglish-all.hyp-ref.masked-examples.jsonl \
+		    python -u scripts/finetune_t5.py --bsz 8 --epochs 5 data/metrics/wmt14-18-intoEnglish-all.hyp-ref.jsonl \
 		    --output_dir models/train_t5_metrics/ 2>> models/train_t5_metrics/train.log

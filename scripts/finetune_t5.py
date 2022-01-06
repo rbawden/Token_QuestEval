@@ -95,7 +95,7 @@ if __name__ == "__main__":
     parser.add_argument('data_prefix')
     parser.add_argument('--output_dir', default='train_t5MT_outputs/')
     parser.add_argument('--epochs', default=1, type=int)
-    parser.add_argument('--bsz', default=512, type=int)
+    parser.add_argument('--bsz', default=8, type=int)
     parser.add_argument('--evalsteps', default=5000, type=int)
     parser.add_argument('--savesteps', default=5000, type=int)
     args = parser.parse_args()

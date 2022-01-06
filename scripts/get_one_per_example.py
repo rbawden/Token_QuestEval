@@ -21,7 +21,7 @@ def process_version1(full_dataset, meta_dataset):
             if len(filtered) > 0:
                 #random.shuffle(filtered)
                 second = filtered[0]
-                print('\t'.join([first, second]))
+                print('\t'.join([second, first]))
             
 def process_version2(full_dataset):
     with open(full_dataset) as fp:
@@ -34,7 +34,7 @@ def process_version2(full_dataset):
             # take a random example
             random.shuffle(examples)
             second = examples[0]
-            print('\t'.join([first, second]))
+            print('\t'.join([second, first]))
 
 if __name__ == '__main__':
 

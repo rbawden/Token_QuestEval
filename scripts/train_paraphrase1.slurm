@@ -12,7 +12,7 @@
 #SBATCH --time=20:00:00        # Temps d’exécution maximum demande (HH:MM:SS)
 #SBATCH --output=slurm_outputs/seg%x_%j_%a.out  # Nom du fichier de sortie contenant l'ID et l'indice
 #SBATCH --error=slurm_outputs/seg%x_%j_%a.out   # Nom du fichier d'erreur (ici commun avec la sortie)
-#SBATCH --array=0-1711%1         # 6 travaux ayant les indices 0, 2, 4, 6, 8, et 10
+#SBATCH --array=0-171%1         # 6 travaux ayant les indices 0, 2, 4, 6, 8, et 10
 
 # go into the submission directory 
 cd ${SLURM_SUBMIT_DIR}
@@ -32,5 +32,5 @@ eval "$(/gpfslocalsup/pub/anaconda-py3/2020.02/bin/conda shell.bash hook)"
 conda activate py38
 
 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 \
-		    python -u scripts/finetune_t5.py data/paraphrase/parabank1-parts/parabank1-parts/parabank1.threshold0.7.detok.masked-examples.jsonl.part-${SLURM_ARRAY_TASK_ID} \
+		    python -u scripts/finetune_t5.py data/paraphrase/parabank1-parts/parabank1.threshold0.7.detok.jsonl.part-${SLURM_ARRAY_TASK_ID} --bsz 8 \
 		    --output_dir models/train_t5_parabank1/ 2>> models/train_t5_parabank1/train.log

@@ -1,6 +1,8 @@
 #!/bin/sh
+thisdir=`realpath $(dirname $0)`
+maindir=$thisdir/..
+data_folder=$maindir/data/metrics
 
-data_folder=$1 # path to data/metrics
 
 for year in 14 15 16 17 18; do
     # go through all into-English reference files
@@ -10,7 +12,7 @@ for year in 14 15 16 17 18; do
 	lp_dash=`echo $lp | perl -pe 's/(..)(en)/\1-\2/'` # e.g. fi-en
 	# for each mt submission for this language pair, print out reference and submission
 	for mt_sub in `ls $data_folder/wmt$year/hyp/$lp_dash/newstest20$year*en`; do
-	    paste $mt_sub $ref
+	    paste $mt_sub $ref 
 	done
     done
 done
