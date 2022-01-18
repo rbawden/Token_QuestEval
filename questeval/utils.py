@@ -82,6 +82,7 @@ class API_T2T:
         self.sliding_window_size = sliding_window_size
         self.max_seq_length = max_seq_length
         self.model_batch_size = model_batch_size
+        self.text_pair_batch_size = 4
 
         if device == "cuda":
             self.model.cuda()
@@ -126,7 +127,6 @@ class API_T2T:
         reference = text_pair["reference"]
         hyp_lang = text_pair["hyp_lang"]
         ref_lang = text_pair["ref_lang"]
-        t5_tokenizer = self.tokenizer
 
         # get the list of words (intersection of spaCy and T5 tokenization)
         hyp_word_list = self.get_word_list(hypothesis, SPACY_PIPELINES[hyp_lang])
@@ -251,36 +251,38 @@ class API_T2T:
         all_mask_tags = []
         all_word_numbers = [] #number each text pairs produced
 
-        for i in range(0, len(text_pairs), self.model_batch_size):
+        for i in range(0, len(text_pairs), self.text_pair_batch_size):
 
-            batch = text_pairs[i: i+self.model_batch_size]
+            batch = text_pairs[i: i+self.text_pair_batch_size]
             input_batch, labels, mask_tags, word_numbers = self.preprocess_batch(batch)
             all_word_numbers = all_word_numbers + word_numbers
             all_labels = all_labels + labels
             all_mask_tags = all_mask_tags + mask_tags
 
-            with torch.no_grad():
-                input_ids, attention_mask = torch.tensor(input_batch["input_ids"]),  torch.tensor(input_batch["attention_mask"])
-                dict_generated_ids = self.model.generate(
-                    input_ids=input_ids.to(self.model.device),
-                    attention_mask=attention_mask.to(self.model.device),
-                    use_cache=True,
-                    decoder_start_token_id=None,
-                    num_beams=1,
-                    num_return_sequences=1,
-                    do_sample=False,
-                    output_scores=True,
-                    return_dict_in_generate=True
-                )
+            for k in range(0, len(labels), self.model_batch_size):
+                with torch.no_grad():
+                    input_ids = torch.tensor(input_batch["input_ids"][k: k+self.model_batch_size])
+                    attention_mask = torch.tensor(input_batch["attention_mask"][k: k+self.model_batch_size])
+                    dict_generated_ids = self.model.generate(
+                        input_ids=input_ids.to(self.model.device),
+                        attention_mask=attention_mask.to(self.model.device),
+                        use_cache=True,
+                        decoder_start_token_id=None,
+                        num_beams=1,
+                        num_return_sequences=1,
+                        do_sample=False,
+                        output_scores=True,
+                        return_dict_in_generate=True
+                    )
 
-                # generate answers + compute answerability
-                gen_text = self.tokenizer.batch_decode(
-                    dict_generated_ids['sequences'],
-                    skip_special_tokens=True,
-                    clean_up_tokenization_spaces=True
-                )
+                    # generate answers + compute answerability
+                    gen_text = self.tokenizer.batch_decode(
+                        dict_generated_ids['sequences'],
+                        skip_special_tokens=True,
+                        clean_up_tokenization_spaces=True
+                    )
 
-                preds += gen_text
+                    preds += gen_text
 
         assert len(preds) == len(all_labels)
         assert len(preds) == len(all_mask_tags)

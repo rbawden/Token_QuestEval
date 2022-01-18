@@ -64,7 +64,7 @@ class MaskEval:
             self,
             hypothesis: List[str],
             references: List[str],
-            batch_size: int = 2 #TODO: change to much bigger value
+            batch_size: int = 86
     ) -> Dict:
 
         assert hypothesis is not None
