@@ -1,14 +1,18 @@
-from questeval.token_questeval import Token_QuestEval
+from questeval.maskeval import MaskEval
 
 def main():
-    questeval = Token_QuestEval()
-    prediction_1 = "Jean prefers apples over pears. Apples are sweeter."
-    source_1 = "Jean likes apples more than pears. Pears are not that sweet."
+    questeval = MaskEval(fill_mask_model_name="models/t5_cnn_model/checkpoint-85920")
+    hypothesis = ["I have trouble coming up with characters' names",
+                  "This is a fun-loving copper-coated bear!",
+                  "Our trip to Timor-Leste didn't cost us more than 2,000$.",
+                  "It was snowing heavily today."
+                  ]
+    reference = ["It's difficult for me to name fictional characters",
+                 "I saw a fun_loving bear today, covered with copper!",
+                 "Our trip to Timor-Leste isn't expensive.",
+                 "We had a snowy day."]
 
-    prediction_2 = "I want to take a nap at home. Let's go home to nap."
-    source_2 = "I want to go home so I can take a nap. Let's go now."
-
-    score = questeval.corpus_questeval(hypothesis=[prediction_1, prediction_2], sources=[source_1, source_2])
+    score = questeval.corpus_questeval(hypothesis=hypothesis, references=reference)
     print(score)
 
 if __name__ == "__main__":
