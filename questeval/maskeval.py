@@ -120,7 +120,7 @@ class MaskEval:
 
 
         # Compute answer similarity (exact match, BERTScore, etc.)
-        do_answ_sim = False
+        do_answ_sim = True #TO SET TO FALSE
         for log in logs:
             if not log["answ_sim_computed"]:
                 do_answ_sim = True
@@ -135,7 +135,7 @@ class MaskEval:
         return scores
 
     def _exact_match(self, prediction, ground_truth):
-        if prediction == ground_truth:
+        if prediction.lower() == ground_truth.lower():
             return 1
         else:
             return 0
@@ -172,7 +172,7 @@ class MaskEval:
         metric_scores = []
         for metric in self.answer_sim_metrics:
             for l in log["masked"]:
-                if l["masking"] == masking_type:
+                if l["masking"] == masking_type and len(l["ground_truth"]) > 0:
                     if metric in l["comparison_metrics"]:
                         metric_scores.append(l["comparison_metrics"][metric])
                     else:
