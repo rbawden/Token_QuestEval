@@ -1,5 +1,6 @@
 #!/usr/bin/python
 from transformers import T5Tokenizer, T5ForConditionalGeneration
+from questeval.maskeval import MaskEval
 import torch
 
 def p_r_f_score(hyp, ref):
@@ -13,6 +14,20 @@ def p_r_f_score(hyp, ref):
 def bert_score(hyps, refs):
     bert_p, bert_r, bert_f = bert_score.score(hyps, refs, lang='en', rescale_with_baseline=True)
     return bert_p, bert_r, bert_f
+
+
+
+def new_predict(model_path):
+    maskeval = MaskEval(fill_mask_model_name = model_path,  use_cache=False)
+    hypothesis = ["It was snowing heavily today.",
+            "Our trip to Timor-Leste didn't cost us more than 2,000$." ]
+    references = ["We had a snowy day.",
+                  "Our trip to Timor-Leste isn't expensive."] 
+    score, logs = maskeval.corpus_questeval(hypothesis=hypothesis, 
+                                      references=references)
+    print(score)
+    print(logs)
+
 
 def predict_t5(model, hyp, source, batch_size=2):
 
@@ -112,4 +127,5 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     
-    predict_t5(args.model, args.hyp, args.source)
+    #predict_t5(args.model, args.hyp, args.source)
+    new_predict(args.model)

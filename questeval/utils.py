@@ -250,6 +250,7 @@ class API_T2T:
         all_labels = []
         all_mask_tags = []
         all_word_numbers = [] #number each text pairs produced
+        all_pred_scores = []
 
         for i in range(0, len(text_pairs), self.text_pair_batch_size):
 
@@ -274,6 +275,20 @@ class API_T2T:
                         output_scores=True,
                         return_dict_in_generate=True
                     )
+                    # prediction scores (start from index 2 each time)
+                    these_pred_scores = [[] for i in range(len(dict_generated_ids['sequences']))]
+                    # go through from 0 to max length of predictions (ignore first 2, which are always the same)
+                    for i in range(2, len(dict_generated_ids['scores'])):
+                        # softmax scores first
+                        scores = nn.functional.log_softmax(dict_generated_ids['scores'][i])
+                        idxs = dict_generated_ids['sequences'].t()[i]
+                        # select the scores corresponding to the indices of the predicted subwords
+                        pred_scores = scores.gather(-1, idxs.unsqueeze(0)).squeeze(0)
+                        # store prediction scores for each predicted subword
+                        for p in range(pred_scores.shape[-1]):
+                            # exclude special tokens and padding
+                            if idxs[p].item() not in [0, 1, 32099]:
+                                these_pred_scores[p].append(pred_scores[p].item())
 
                     # generate answers + compute answerability
                     gen_text = self.tokenizer.batch_decode(
@@ -283,15 +298,18 @@ class API_T2T:
                     )
 
                     preds += gen_text
+                    all_pred_scores.extend(these_pred_scores)
 
         assert len(preds) == len(all_labels)
         assert len(preds) == len(all_mask_tags)
         assert len(all_word_numbers) == len(text_pairs)
         assert sum(all_word_numbers) == len(preds)
+        assert len(all_pred_scores) == len(all_labels)
 
         outputs = []
         for k in range(len(preds)):
             output = {
+                "pred_scores": all_pred_scores[k],
                 "prediction": preds[k],
                 "ground_truth": all_labels[k],
                 "masking": all_mask_tags[k],

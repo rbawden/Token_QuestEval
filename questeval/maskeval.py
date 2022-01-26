@@ -54,7 +54,6 @@ class MaskEval:
                 sliding_window_size=self.sliding_window_size,
                 device=self.device
             )
-
         else:
             raise NotImplementedError(f'Model Name ({model_name}) Not Handled: the model name should contain t5 or mt5')
 
@@ -71,7 +70,10 @@ class MaskEval:
         assert references is not None
         assert len(references) == len(hypothesis)
 
+        print(self.use_cache)
+        print(hypothesis, references)
         scores = []
+        all_logs = []
         for ex_idx in range(0, len(hypothesis), batch_size):
             logging.info(f"Total examples: {len(hypothesis)}. Proceeding the examples {ex_idx}")
 
@@ -86,13 +88,15 @@ class MaskEval:
                     "ref_lang": self.language
                 }
                 batch_text_pairs.append(text_pair)
-
-            scores += self._batch_questeval(
+                print(batch_text_pairs)
+            new_scores, logs = self._batch_questeval(
                 text_pairs=batch_text_pairs
             )
+            scores += new_scores
+            all_logs += logs
 
         result = {'corpus_score': np.average(scores), 'ex_level_scores': scores}
-        return result
+        return result, logs
 
     def _batch_questeval(
             self,
@@ -118,7 +122,6 @@ class MaskEval:
                 log["prediction_done"] = True
             self._serialize_logs(logs, logs_hashes)
 
-
         # Compute answer similarity (exact match, BERTScore, etc.)
         do_answ_sim = True #TO SET TO FALSE
         for log in logs:
@@ -132,7 +135,7 @@ class MaskEval:
 
         # Calculate Score
         scores = self._calculate_score_from_logs(logs)
-        return scores
+        return scores, logs
 
     def _exact_match(self, prediction, ground_truth):
         if prediction.lower() == ground_truth.lower():
@@ -140,9 +143,14 @@ class MaskEval:
         else:
             return 0
 
+    def _pred_score(self, prediction):
+        1
+
     def _compute_answer_similarity(self, logs):
         for log in logs:
             for l in log["masked"]:
+                print("prediction = ", l["prediction"])
+                print("ground truth = ", l["ground_truth"])
                 l["comparison_metrics"] = {
                     "exact_match": self._exact_match(prediction = l["prediction"],
                                                      ground_truth = l["ground_truth"])
