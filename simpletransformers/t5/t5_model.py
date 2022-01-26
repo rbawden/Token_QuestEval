@@ -168,6 +168,13 @@ class T5Model:
             self.args.wandb_project = None
         self.args.sliding_window_size = sliding_window_size
 
+        self.args.tokenizer_indices = {
+            "<extra_id_0>": self.tokenizer.convert_tokens_to_ids("<extra_id_0>"),
+            "<extra_id_1>": self.tokenizer.convert_tokens_to_ids("<extra_id_1>"),
+            "<sep>": self.tokenizer.convert_tokens_to_ids("<sep>"),
+            "</s>": self.tokenizer.convert_tokens_to_ids("</s>")
+        }
+
     def train_model(
             self,
             train_data,
@@ -1046,14 +1053,16 @@ class T5Model:
         """
         Performs predictions on a list of text.
         Args:
-            to_predict: A python list of text (str) to be sent to the model for prediction. Note that the prefix should be prepended to the text.
-        Returns:
-            preds: A python list of the generated sequences.
+            to_predict: a Python list of dictionaries {"hypothesis": str, "reference": str, "hyp_lang": str, "ref_lang": str}
+            outputs: A python list of the generated sequences.
+            ground_truths: A python list of ground truths 
         """  # noqa: ignore flake8"
 
         self._move_model_to_device()
 
         all_outputs = []
+        ground_truths = []
+        all_mask_tags = []
         # Batching
         for batch in tqdm(
                 [
@@ -1063,7 +1072,10 @@ class T5Model:
                 desc="Generating outputs",
                 disable=self.args.silent,
         ):
-            input_batch = preprocess_for_pred(batch, self.tokenizer, self.args)
+            input_batch, labels, mask_tags = preprocess_for_pred(batch, self.tokenizer, self.args)
+            ground_truths = ground_truths + labels
+            all_mask_tags = all_mask_tags + mask_tags
+
             input_ids = torch.tensor(input_batch["input_ids"])
             attention_mask = torch.tensor(input_batch["attention_mask"])
 
@@ -1114,12 +1126,12 @@ class T5Model:
             ]
 
         if self.args.num_return_sequences > 1:
-            return [
+            outputs = [
                 outputs[i: i + self.args.num_return_sequences]
                 for i in range(0, len(outputs), self.args.num_return_sequences)
             ]
-        else:
-            return outputs
+
+        return outputs, ground_truths, all_mask_tags
 
     def _decode(self, output_id):
         return self.tokenizer.decode(

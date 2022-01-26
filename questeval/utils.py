@@ -6,463 +6,314 @@ import collections
 import torch
 import torch.nn as nn
 import hashlib
-
-from transformers import (
-    T5ForConditionalGeneration,
-    T5Tokenizer,
-)
-
-
-def text2hash(string: str) -> str:
-    hash_object = hashlib.sha512(string.encode('utf-8'))
-    hex_dig = hash_object.hexdigest()
-
-    return hex_dig
+from transformers.models.t5 import T5ForConditionalGeneration, T5TokenizerFast
+from transformers.models.mt5 import MT5ForConditionalGeneration, MT5TokenizerFast
+import spacy
+from spacy.lang.id import Indonesian
+from spacy.lang.tr import Turkish
 
 
-def split_on_punct(doc):
-    """
-    From one spacy doc to a List of (sentence_text, (start, end))
-    """
-    start = 0
-    seen_period = False
-    start_idx = 0
-    for i, token in enumerate(doc):
-        if seen_period and not token.is_punct:
-            yield doc[start: token.i].text, (start_idx, token.idx)
-            start = token.i
-            start_idx = token.idx
-            seen_period = False
-        elif token.text in [".", "!", "?"]:
-            seen_period = True
-    if start < len(doc):
-        yield doc[start: len(doc)].text, (start_idx, len(doc.text))
+MODEL_CLASSES = {
+    "t5": (T5ForConditionalGeneration, T5TokenizerFast),
+    "mt5": (MT5ForConditionalGeneration, MT5TokenizerFast),
+}
+
+SPACY_PIPELINE_NAMES = {
+    "en": "en_core_web_sm",
+    "fr": "fr_core_news_sm",
+    "es": "es_core_news_sm",
+    "de": "de_core_news_sm",
+    "ru": "ru_core_news_sm",
+    "zh": "zh_core_web_sm"
+}
+
+SPACY_PIPELINES = {}
+
+for lang in SPACY_PIPELINE_NAMES:
+    pipeline_name = SPACY_PIPELINE_NAMES[lang]
+    try:
+        pipeline = spacy.load(pipeline_name)
+    except OSError:
+        from spacy.cli import download
+        download(pipeline_name)
+        pipeline = spacy.load(pipeline_name)
+    SPACY_PIPELINES[lang] = pipeline
+
+SPACY_PIPELINES["id"] = Indonesian()
+SPACY_PIPELINES["tr"] = Turkish()
 
 
-def sentencize(
-    text: str, spacy_pipeline
-) -> List:
-    preprocessed_context = spacy_pipeline(text)
-    return [sentence_tuple[0] for sentence_tuple in split_on_punct(preprocessed_context)]
+def resize(original_list, desired_len, stop_index):
+    if len(original_list) > desired_len:
+        output = original_list[:(desired_len - 1)] + [stop_index]
+    elif len(original_list) < desired_len:
+        output = original_list[:desired_len] + [0] * (desired_len - len(original_list))
+    else:
+        output = original_list
 
+    return output
 
 class API_T2T:
     def __init__(
         self,
         pretrained_model_name_or_path: str,
-        max_source_length: int,
+        max_seq_length: int,
         model_batch_size: int,
-        keep_score_idx: int,  # Note: will work only if beamsize == 1
+        sliding_window_size: int,  # Note: will work only if beamsize == 1
         device: str = "cuda"
     ) -> None:
+
         self.pretrained_model_name_or_path = pretrained_model_name_or_path
-        self.tokenizer = T5Tokenizer.from_pretrained(
+
+        if 'mt5' in pretrained_model_name_or_path:
+            model_type = "mt5"
+        else:
+            model_type = 't5'
+
+        model_class, model_tokenizer = MODEL_CLASSES[model_type]
+
+        self.tokenizer = model_tokenizer.from_pretrained(
+            pretrained_model_name_or_path=pretrained_model_name_or_path
+        )
+        self.model = model_class.from_pretrained(
             pretrained_model_name_or_path=pretrained_model_name_or_path
         )
 
-        self.model = T5ForConditionalGeneration.from_pretrained(
-            pretrained_model_name_or_path=pretrained_model_name_or_path
-        )
-
-        self.keep_score_idx = keep_score_idx
+        self.sliding_window_size = sliding_window_size
+        self.max_seq_length = max_seq_length
+        self.model_batch_size = model_batch_size
+        self.text_pair_batch_size = 4
 
         if device == "cuda":
             self.model.cuda()
-        self.max_source_length = max_source_length
-        self.model_batch_size = model_batch_size
 
-        self.loss_fct = nn.NLLLoss(reduction='none', ignore_index=self.model.config.pad_token_id)
-        self.lsm = nn.LogSoftmax(dim=1)
+        self.tokenizer_indices = {
+            "<extra_id_0>": self.tokenizer.convert_tokens_to_ids("<extra_id_0>"),
+            "<extra_id_1>": self.tokenizer.convert_tokens_to_ids("<extra_id_1>"),
+            "<sep>": self.tokenizer.convert_tokens_to_ids("<sep>"),
+            "</s>": self.tokenizer.convert_tokens_to_ids("</s>")
+        }
 
-    def predict(
-        self,
-        sources: List[str],
-        ground_truth_answs: List[str],
-        compute_bartscore: bool
-    ):
-        # sources should be question <s> context
-        bartscore_list = []
-        gen_texts = []
-        keep_score_idx_scores = []
+        #self.loss_fct = nn.NLLLoss(reduction='none', ignore_index=self.model.config.pad_token_id)
+        #self.lsm = nn.LogSoftmax(dim=1)
 
-        for i in range(0, len(sources), self.model_batch_size):
-            encoded_src = self.tokenizer(
-                sources[i: i+self.model_batch_size],
-                max_length=self.max_source_length,
-                padding="max_length",
-                truncation=True,
-                return_tensors="pt",
-                verbose=False,
-            )
+    def get_word_list(self, sentence, spacy_tokenizer):
+        t5_tokenizer = self.tokenizer
 
-            encoded_tgt = self.tokenizer(
-                ground_truth_answs[i: i + self.model_batch_size],
-                max_length=self.max_source_length,
-                padding="max_length",
-                truncation=True,
-                return_tensors="pt",
-                verbose=False,
-            )
+        t5_result = t5_tokenizer(sentence, return_offsets_mapping=True)
+        t5_tok = t5_result['input_ids']
+        spacy_tok = [(t.text, t.idx) for t in spacy_tokenizer(sentence)]
 
-            with torch.no_grad():
-                source_ids, source_mask = encoded_src["input_ids"], encoded_src["attention_mask"]
-                dict_generated_ids = self.model.generate(
-                    input_ids=source_ids.to(self.model.device),
-                    attention_mask=source_mask.to(self.model.device),
-                    use_cache=True,
-                    decoder_start_token_id=None,
-                    num_beams=1,
-                    num_return_sequences=1,
-                    do_sample=False,
-                    output_scores=True,
-                    return_dict_in_generate=True
-                )
+        # Get the mapping for both t5 and spacy tokenization, and then the INTERSECTION of both
+        t5_idxs = [t[1] for t in t5_result['offset_mapping']]
 
-                # generate answers + compute answerability
-                gen_text = self.tokenizer.batch_decode(
-                    dict_generated_ids['sequences'],
-                    skip_special_tokens=True,
-                    clean_up_tokenization_spaces=True
-                )
+        t5_tok_idx_pairs = list(zip(t5_tok, t5_idxs))
+        spacy_idxs = [t[1] + len(t[0]) for t in spacy_tok]
 
-                gen_texts += gen_text
+        intersection = sorted(list(set(t5_idxs) & set(spacy_idxs)))
 
-                keep_score_idx_score = (1 - dict_generated_ids['scores'][0].softmax(-1)[:, self.keep_score_idx])
-                if len(gen_text) != 1:
-                    keep_score_idx_score = keep_score_idx_score.squeeze()
-                keep_score_idx_scores += keep_score_idx_score.tolist()
+        word_list = []
+        sublist = []
+        for tok, idx in t5_tok_idx_pairs:
+            sublist.append(tok)
+            if idx in intersection:
+                word_list.append(sublist)
+                sublist = []
 
+        return word_list
 
-                if compute_bartscore:
-                    tgt_tokens = encoded_tgt['input_ids'].to(self.model.device)
-                    tgt_mask = encoded_tgt['attention_mask']
-                    tgt_len = tgt_mask.sum(dim=1).to(self.model.device)
+    def get_all_masked_sequences(self, text_pair):
+        hypothesis = text_pair["hypothesis"]
+        reference = text_pair["reference"]
+        hyp_lang = text_pair["hyp_lang"]
+        ref_lang = text_pair["ref_lang"]
 
-                    bartscore_output = self.model(
-                        input_ids=encoded_src['input_ids'].to(self.model.device),
-                        attention_mask=encoded_src['attention_mask'].to(self.model.device),
-                        labels=tgt_tokens
+        # get the list of words (intersection of spaCy and T5 tokenization)
+        hyp_word_list = self.get_word_list(hypothesis, SPACY_PIPELINES[hyp_lang])
+        ref_word_list = self.get_word_list(reference, SPACY_PIPELINES[ref_lang])
+
+        ref_tokens = [item for sublist in ref_word_list for item in sublist]
+        hyp_tokens = [item for sublist in hyp_word_list for item in sublist]
+
+        all_masked_seqs = []
+
+        # loop over all words in hypothesis
+        for index in range(len(hyp_word_list)):
+            label = [self.tokenizer_indices["<extra_id_0>"]] + hyp_word_list[index] \
+                    + [self.tokenizer_indices["<extra_id_1>"], self.tokenizer_indices["</s>"]]
+
+            copy_hyp_word_list = hyp_word_list.copy()
+            copy_hyp_word_list[index] = self.tokenizer_indices["<extra_id_0>"]
+
+            # get list of tokens before and after the masked word
+            word_list_before = copy_hyp_word_list[0:index]
+            token_list_before = [item for sublist in word_list_before for item in sublist]
+            word_list_after = copy_hyp_word_list[index + 1:]
+            token_list_after = [item for sublist in word_list_after for item in sublist]
+
+            # apply sliding window
+            token_list_before = token_list_before[-self.sliding_window_size:]
+            token_list_after = token_list_after[:self.sliding_window_size]
+            masked_seq = token_list_before + [self.tokenizer_indices["<extra_id_0>"]] + token_list_after
+
+            # compute nb of tokens left for context
+            ref_length = self.max_seq_length - len(masked_seq) - 2
+            ref_tokens = ref_tokens[:ref_length]
+
+            mask_dict = {"masking": "hyp",
+                         "label_tokens": label,
+                         "hyp_tokens": masked_seq,
+                         "ref_tokens": ref_tokens}
+
+            all_masked_seqs.append(mask_dict)
+
+        # loop over all words in reference
+        for index in range(len(ref_word_list)):
+            label = [self.tokenizer_indices["<extra_id_0>"]] + ref_word_list[index] \
+                    + [self.tokenizer_indices["<extra_id_1>"], self.tokenizer_indices["</s>"]]
+
+            copy_ref_word_list = ref_word_list.copy()
+            copy_ref_word_list[index] = self.tokenizer_indices["<extra_id_0>"]
+
+            # get list of tokens before and after the masked word
+            word_list_before = copy_ref_word_list[0:index]
+            token_list_before = [item for sublist in word_list_before for item in sublist]
+            word_list_after = copy_ref_word_list[index + 1:]
+            token_list_after = [item for sublist in word_list_after for item in sublist]
+
+            # apply sliding window
+            token_list_before = token_list_before[-self.sliding_window_size:]
+            token_list_after = token_list_after[:self.sliding_window_size]
+            masked_seq = token_list_before + [self.tokenizer_indices["<extra_id_0>"]] + token_list_after
+
+            # compute nb of tokens left for context
+            hyp_length = self.max_seq_length - len(masked_seq) - 2
+            hyp_tokens = hyp_tokens[:hyp_length]
+
+            mask_dict = {"masking": "ref",
+                         "label_tokens": label,
+                         "hyp_tokens": hyp_tokens,
+                         "ref_tokens": masked_seq}
+
+            all_masked_seqs.append(mask_dict)
+
+        return all_masked_seqs
+
+    def preprocess_batch(self, batch, order="hyp_first"):
+        # set order = "focus-first" to do: focus <sep> context
+        # set order = "hyp_first" to do: hypothesis <sep> reference/source
+
+        input_batch = {
+            "input_ids": [],
+            "attention_mask": []
+        }
+        labels = []
+        mask_tags = []
+        word_numbers = []
+
+        for text_pair in batch:
+            all_masked_seqs = self.get_all_masked_sequences(text_pair)
+            word_numbers.append(len(all_masked_seqs))
+            for mask_dict in all_masked_seqs:
+                if order == "hyp_first":
+                    input_ids = mask_dict["hyp_tokens"] + [self.tokenizer_indices["<sep>"]] + mask_dict[
+                        "ref_tokens"] + [self.tokenizer_indices["</s>"]]
+                else:
+                    if mask_dict["masking"] == "hyp":
+                        input_ids = mask_dict["hyp_tokens"] + [self.tokenizer_indices["<sep>"]] + mask_dict[
+                            "ref_tokens"] + [self.tokenizer_indices["</s>"]]
+                    else:  # mask_dict["masking"] == "ref"
+                        input_ids = mask_dict["ref_tokens"] + [self.tokenizer_indices["<sep>"]] + mask_dict[
+                            "hyp_tokens"] + [self.tokenizer_indices["</s>"]]
+
+                attention_mask = len(input_ids) * [1]
+
+                input_ids = resize(input_ids, self.max_seq_length, self.tokenizer_indices["</s>"])
+                attention_mask = resize(attention_mask, self.max_seq_length, 1)
+                label_str = self.tokenizer.decode(mask_dict["label_tokens"], skip_special_tokens=True)
+
+                input_batch["input_ids"].append(input_ids)
+                input_batch["attention_mask"].append(attention_mask)
+                labels.append(label_str)
+                mask_tags.append(mask_dict["masking"])
+
+        return input_batch, labels, mask_tags, word_numbers
+
+    def predict(self, text_pairs: dict):
+        # text_pairs should be a list of dict, each dict being of the form:
+        #{"hypothesis": str,
+        # "reference": str,
+        # "hyp_lang": str,
+        # "ref_lang": str}
+
+        preds = []
+        all_labels = []
+        all_mask_tags = []
+        all_word_numbers = [] #number each text pairs produced
+
+        for i in range(0, len(text_pairs), self.text_pair_batch_size):
+
+            batch = text_pairs[i: i+self.text_pair_batch_size]
+            input_batch, labels, mask_tags, word_numbers = self.preprocess_batch(batch)
+            all_word_numbers = all_word_numbers + word_numbers
+            all_labels = all_labels + labels
+            all_mask_tags = all_mask_tags + mask_tags
+
+            for k in range(0, len(labels), self.model_batch_size):
+                with torch.no_grad():
+                    input_ids = torch.tensor(input_batch["input_ids"][k: k+self.model_batch_size])
+                    attention_mask = torch.tensor(input_batch["attention_mask"][k: k+self.model_batch_size])
+                    dict_generated_ids = self.model.generate(
+                        input_ids=input_ids.to(self.model.device),
+                        attention_mask=attention_mask.to(self.model.device),
+                        use_cache=True,
+                        decoder_start_token_id=None,
+                        num_beams=1,
+                        num_return_sequences=1,
+                        do_sample=False,
+                        output_scores=True,
+                        return_dict_in_generate=True
                     )
 
-                    logits = bartscore_output.logits.view(-1, self.model.config.vocab_size)
-                    loss = self.loss_fct(self.lsm(logits), tgt_tokens.view(-1))
-                    loss = loss.view(tgt_tokens.shape[0], -1)
-                    loss = loss.sum(dim=1) / tgt_len
-                    curr_score_list = [-x.item() for x in loss]
+                    # generate answers + compute answerability
+                    gen_text = self.tokenizer.batch_decode(
+                        dict_generated_ids['sequences'],
+                        skip_special_tokens=True,
+                        clean_up_tokenization_spaces=True
+                    )
 
-                    bartscore_list += curr_score_list
-                else:
-                    bartscore_list += [-999]*len(keep_score_idx_score.tolist())
+                    preds += gen_text
 
-        return bartscore_list, keep_score_idx_scores, gen_texts
+        assert len(preds) == len(all_labels)
+        assert len(preds) == len(all_mask_tags)
+        assert len(all_word_numbers) == len(text_pairs)
+        assert sum(all_word_numbers) == len(preds)
 
-    def DEPRECATED_calculate_bartscore(
-            self,
-            sources: List[str],
-            ground_truth_answs: List[str],
-    ):
-        #source = mask question <sep> context
-        score_list = []
+        outputs = []
+        for k in range(len(preds)):
+            output = {
+                "prediction": preds[k],
+                "ground_truth": all_labels[k],
+                "masking": all_mask_tags[k],
+                "comparison_metrics": {}, #TODO: any perplexity-related metrics should be added here
+                "POS_tag": "NA", #TODO
+                "weight": 0.0
+            }
 
-        for i in range(0, len(sources), self.model_batch_size):
-            encoded_src = self.tokenizer(
-                sources[i: i + self.model_batch_size],
-                max_length=self.max_source_length,
-                padding="max_length",
-                truncation=True,
-                return_tensors="pt",
-                verbose=False,
-            )
+            outputs.append(output)
 
-            encoded_tgt = self.tokenizer(
-                ground_truth_answs[i: i + self.model_batch_size],
-                max_length=self.max_source_length,
-                padding="max_length",
-                truncation=True,
-                return_tensors="pt",
-                verbose=False,
-            )
+        categorized_outputs = []
+        left_index = 0
+        right_index = 0
+        indices = []
 
-            with torch.no_grad():
+        for i in range(len(all_word_numbers)):
+            right_index = right_index + all_word_numbers[i]
+            indices.append((left_index, right_index))
+            left_index = right_index
 
-                src_tokens = encoded_src['input_ids'].to(self.model.device)
-                src_mask = encoded_src['attention_mask'].to(self.model.device)
+        for (l, r) in indices:
+            categorized_outputs.append(outputs[l:r])
 
-                tgt_tokens = encoded_tgt['input_ids'].to(self.model.device)
-                tgt_mask = encoded_tgt['attention_mask']
-                tgt_len = tgt_mask.sum(dim=1).to(self.model.device)
+        return categorized_outputs
 
-                output = self.model(
-                    input_ids=src_tokens,
-                    attention_mask=src_mask,
-                    labels=tgt_tokens
-                )
-
-                logits = output.logits.view(-1, self.model.config.vocab_size)
-                loss = self.loss_fct(self.lsm(logits), tgt_tokens.view(-1))
-                loss = loss.view(tgt_tokens.shape[0], -1)
-                loss = loss.sum(dim=1) / tgt_len
-                curr_score_list = [-x.item() for x in loss]
-
-                score_list += curr_score_list
-
-        return score_list
-
-
-def calculate_f1_squad(
-    a_gold: str,
-    a_pred: str
-) -> float:
-    def normalize_answer(s):
-        """Lower text and remove punctuation, articles and extra whitespace."""
-
-        def remove_articles(text):
-            regex = re.compile(r'\b(a|an|the)\b', re.UNICODE)
-            return re.sub(regex, ' ', text)
-
-        def white_space_fix(text):
-            return ' '.join(text.split())
-
-        def remove_punc(text):
-            exclude = set(string.punctuation)
-            return ''.join(ch for ch in text if ch not in exclude)
-
-        def lower(text):
-            return text.lower()
-
-        return white_space_fix(remove_articles(remove_punc(lower(s))))
-
-    def get_tokens(s):
-        if not s: return []
-        return normalize_answer(s).split()
-
-    gold_toks = get_tokens(a_gold)
-    pred_toks = get_tokens(a_pred)
-    common = collections.Counter(gold_toks) & collections.Counter(pred_toks)
-    num_same = sum(common.values())
-    if len(gold_toks) == 0 or len(pred_toks) == 0:
-        # If either is no-answer, then F1 is 1 if they agree, 0 otherwise
-        return int(gold_toks == pred_toks)
-    if num_same == 0:
-        return 0
-    precision = 1.0 * num_same / len(pred_toks)
-    recall = 1.0 * num_same / len(gold_toks)
-    f1 = (2 * precision * recall) / (precision + recall)
-    return f1
-
-
-def calculate_BERTScore(
-    model_predictions: List[str],
-    gold_references: List[str],
-    metric_BERTScore,
-    device: str,
-) -> List[float]:
-
-    if len(model_predictions) == 0:
-        return []
-
-    metric_BERTScore.add_batch(predictions=model_predictions, references=gold_references)
-    final_score = metric_BERTScore.compute(model_type='bert-base-multilingual-cased', device=device)
-
-    """
-    # set all unanswerable scores to 0
-    for i, (pred) in enumerate(model_predictions):
-        if pred == "unanswerable":
-            final_score['f1'][i] = 0.0
-    """
-    return [f1 for f1 in final_score['f1']]
-
-
-def extract_table_answers(
-    text: str
-) -> List[str]:
-
-    asws = []
-
-    asw_toks = []
-    is_asw = False
-    for tok in text.split():
-
-        if tok == ']':
-            asws.append(' '.join(asw_toks))
-            is_asw = False
-            asw_toks = []
-
-        if is_asw:
-            asw_toks.append(tok)
-
-        if tok == '[':
-            is_asw = True
-    return asws
-
-
-class WrongE2EFormat(
-    Exception
-):
-    def __init__(self, obj):
-        err = """
-            It seems you passed an objected weirdly formatted.
-            For E2E, please give a Meaning Representation as a string, 
-            formatted as below:
-                input = 'name[The Eagle], eatType[coffee shop], food[Japanese]'
-            Your object was: {}
-        """
-        super().__init__(err.format(obj))
-
-
-def linearize_e2e_input(
-    input: str,
-    format: str ='gem'
-) -> str:
-    """
-    Linearize an E2E input for QuestEval.
-    Input must be a string, in standard E2E format.
-    Example:
-        'name[The Eagle], eatType[coffee shop], food[Japanese]'
-    lowercase=True indicates that you want all tokens to be lowercased.
-    """
-    if format != 'gem':
-        raise ValueError(f'Unsupported format for now: {format}')
-
-    if not isinstance(input, str):
-        raise WrongE2EFormat(input)
-
-    items = dict([s.strip()[:-1].split('[') for s in input.split(',')])
-
-    return ' , '.join([
-        f'{key} [ {value} ]'
-        for key, value in items.items()
-    ])
-
-
-class LinearizeWebnlgInput():
-
-    def __init__(
-        self,
-        spacy_pipeline,
-        lowercase=False,
-        format: str ='gem',
-    ):
-        """
-        Linearize a WebNLG input for QuestEval.
-        Input must be a list of triples, each being a string with two "|".
-        Example:
-            [
-                "(15788)_1993_SB | discoverer | Donal_O'Ceallaigh",
-                "(15788)_1993_SB | epoch | 2006-03-06"
-            ]
-        lowercase=True indicates that you want all strings to be lowercased.
-        """
-
-        self.lowercase = lowercase
-        self.format = format
-        self.spacy_pipeline = spacy_pipeline
-
-    def __call__(
-        self,
-        input: List[str]
-    )-> str:
-
-        if self.format != 'gem':
-            raise ValueError(f'Unsupported format for now: {self.format}')
-
-        if not isinstance(input, list):
-            raise WrongWebNlgFormat(input)
-
-        triples = [Triple(triple,
-                          spacy_pipeline=self.spacy_pipeline,
-                          lower=self.lowercase)
-                   for triple in input]
-
-        table = dict()
-        for triple in triples:
-            table.setdefault(triple.sbj, list())
-            table[triple.sbj].append((triple.obj, triple.prp))
-
-        ret = list()
-        for entidx, (entname, entlist) in enumerate(table.items(), 1):
-            ret.append(f'entity [ {entname} ]')
-            for values, key in entlist:
-                ret.append(f'{key} [ {values} ]')
-
-        return ' , '.join(ret)
-
-
-class Triple:
-    def __init__(
-        self,
-        raw_text: str,
-        spacy_pipeline,
-        lower: bool = False,
-    ):
-        sbj, prp, obj = self.safe_split(raw_text)
-        obj = ' '.join([t.text for t in spacy_pipeline(self.clean_obj(obj.strip(), lc=lower))])
-        prp = self.clean_prp(prp.strip())
-        sbj = ' '.join([t.text for t in spacy_pipeline(self.clean_obj(sbj.strip(), lc=lower))])
-        if prp == 'ethnicgroup':
-            obj = obj.split('_in_')[0]
-            obj = obj.split('_of_')[0]
-
-        self.sbj = sbj
-        self.obj = obj
-        self.prp = prp
-
-    @staticmethod
-    def safe_split(
-        raw_text
-    ) -> List[str]:
-
-        if not isinstance(raw_text, str):
-            raise TypeError('A triple must be a string with two "|"'
-                            f'but you gave: {raw_text}')
-
-        split = raw_text.strip().split('|')
-        if not len(split) == 3:
-            raise TypeError('A triple must be a string with two "|"'
-                            f'but you gave: {raw_text}')
-
-        return split
-
-    def __repr__(self):
-        return f'{self.sbj} | {self.prp} | {self.obj}'
-
-    @staticmethod
-    def clean_obj(
-        s,
-        lc: bool = False
-    ):
-        s = unidecode.unidecode(s)
-        if lc: s = s.lower()
-        s = re.sub('^"|"$', "", s)  # remove useless quotesigns
-        s = re.sub('_', ' ', s)  # turn undescores to spaces
-        return s
-
-    @staticmethod
-    def clean_prp(
-        s: str,
-        lc: bool=False
-    ) -> str:
-        s = unidecode.unidecode(s)
-        if lc: s = s.lower()
-        s = re.sub('^"|"$', "", s)  # remove useless quotesigns
-        s = re.sub('\s+', '_', s)  # turn spaces to underscores
-        s = re.sub('\s+\(in metres\)', '_m', s)
-        s = re.sub('\s+\(in feet\)', '_f', s)
-        s = re.sub('\(.*\)', '', s)
-        return s.strip()
-
-
-class WrongWebNlgFormat(Exception):
-    def __init__(self, obj):
-        err = """
-            It seems you passed an objected weirdly formatted.
-            For webnlg, please give a list of triplets, where each
-            triplet is a string with two '|'.
-            For instance:
-                input = [
-                    "(15788)_1993_SB | discoverer | Donal_O'Ceallaigh",
-                    "(15788)_1993_SB | epoch | 2006-03-06"
-                ]
-            Your object was: {}
-        """
-        super().__init__(err.format(obj))
