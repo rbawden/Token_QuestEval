@@ -70,8 +70,6 @@ class MaskEval:
         assert references is not None
         assert len(references) == len(hypothesis)
 
-        print(self.use_cache)
-        print(hypothesis, references)
         scores = []
         all_logs = []
         for ex_idx in range(0, len(hypothesis), batch_size):
@@ -88,7 +86,6 @@ class MaskEval:
                     "ref_lang": self.language
                 }
                 batch_text_pairs.append(text_pair)
-                print(batch_text_pairs)
             new_scores, logs = self._batch_questeval(
                 text_pairs=batch_text_pairs
             )
@@ -149,8 +146,6 @@ class MaskEval:
     def _compute_answer_similarity(self, logs):
         for log in logs:
             for l in log["masked"]:
-                print("prediction = ", l["prediction"])
-                print("ground truth = ", l["ground_truth"])
                 l["comparison_metrics"] = {
                     "exact_match": self._exact_match(prediction = l["prediction"],
                                                      ground_truth = l["ground_truth"])
