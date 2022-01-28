@@ -280,7 +280,7 @@ class API_T2T:
                     # go through from 0 to max length of predictions (ignore first 2, which are always the same)
                     for i in range(2, len(dict_generated_ids['scores'])):
                         # softmax scores first
-                        scores = nn.functional.log_softmax(dict_generated_ids['scores'][i])
+                        scores = nn.functional.log_softmax(dict_generated_ids['scores'][i], dim=-1)
                         idxs = dict_generated_ids['sequences'].t()[i]
                         # select the scores corresponding to the indices of the predicted subwords
                         pred_scores = scores.gather(-1, idxs.unsqueeze(0)).squeeze(0)
