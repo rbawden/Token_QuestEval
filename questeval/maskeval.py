@@ -11,6 +11,7 @@ from questeval import DIR, __version__
 from questeval.utils import (
     API_T2T,
 )
+from datasets import load_metric
 
 def text2hash(string: str) -> str:
     hash_object = hashlib.sha512(string.encode('utf-8'))
@@ -44,6 +45,7 @@ class MaskEval:
         self.use_cache = use_cache
         self.mask_types_to_consider = mask_types_to_consider
         self.answer_sim_metrics = answer_sim_metrics
+        self.bertscore = load_metric("bertscore")
 
     def get_model(self, model_name: str, ):
         if 't5' in model_name.lower():
@@ -59,6 +61,16 @@ class MaskEval:
 
         return model
 
+    def calculate_bertscore(self, preds, refs, lang='en'):
+        assert lang in ['en', 'multilingual']
+
+        if lang == 'en':
+            scores = self.bertscore._compute(preds, refs, model_type='bert-base-uncased')
+        else:
+            scores = self.bertscore._compute(preds, refs, model_type='bert-base-multilingual-cased')
+        return scores
+    
+            
     def corpus_questeval(
             self,
             hypothesis: List[str],
@@ -91,6 +103,7 @@ class MaskEval:
             )
             scores += new_scores
             all_logs += logs
+            
 
         result = {'corpus_score': np.average(scores), 'ex_level_scores': scores}
         return result, logs
@@ -130,6 +143,19 @@ class MaskEval:
             self._compute_answer_similarity(logs)
             self._serialize_logs(logs, logs_hashes)
 
+        # Calculate BERTscores between predicted labels and gold labels
+        for k in range(len(logs)):
+            pred_seq = ''
+            for w in range(len(logs[k]['masked'])):
+               bertscores = self.calculate_bertscore(logs[k]['masked'][w]['prediction'],
+                                                     logs[k]['masked'][w]['ground_truth'])
+               logs[k]['masked'][w]['bert_scores'] = bertscores
+               pred_seq += ' ' + logs[k]['masked'][w]['prediction']
+            # calculate BERTscore between concat of pred labels and original sequence
+            logs[k]['comparison_metrics']['bertscore_ref_mlmpred'] = self.calculate_bertscore(pred_seq.strip(), logs[k]['ref_text'])
+            logs[k]['comparison_metrics']['bertscore_ref_hyp'] = self.calculate_bertscore(logs[k]['hyp_text'], logs[k]['ref_text'])
+            logs[k]['comparison_metrics']['bertscore_hyp_mlmpred'] = self.calculate_bertscore(pred_seq.strip(), logs[k]['hyp_text'])
+        
         # Calculate Score
         scores = self._calculate_score_from_logs(logs)
         return scores, logs

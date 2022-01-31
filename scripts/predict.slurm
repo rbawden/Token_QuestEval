@@ -48,9 +48,8 @@ echo $ref_file
 #hyp=$maindir/data/metrics/wmt$year/hyp/newstest2021.HuaweiTSC.ha-en
 #ref=$maindir/data/metrics/wmt$year/ref/newstest2021.ha-en.ref.A.en \
 
-[ -d $maindir/scores/metric/wmt$year ] || mkdir -p $maindir/scores/metric/wmt$year
+[ -d $maindir/scores/wmt$year/token-eval/$langpair ] || mkdir -p $maindir/scores/wmt$year/token-eval/$langpair
 
 TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 python $maindir/scripts/predict_t5.py \
 		    $maindir/models/train_t5_parabank1/checkpoint-395000/ "$hyp_file" "$ref_file" \
-		    > $maindir/scores/metric/wmt$year/$dset.$sysid.$langpair.all-scores
-
+		    > $maindir/scores/wmt$year/token-eval/$langpair/$sysid.seg.all-scores

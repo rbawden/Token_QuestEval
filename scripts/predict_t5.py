@@ -5,19 +5,6 @@ import torch
 import json
 import numpy as np
 
-def p_r_f_score(hyp, ref):
-    hyp_toks = hyp.split() # other tokenisation?
-    ref_toks = ref.split() # ditto
-    same = [x for x in hyp_toks if x in ref_toks]
-    p = same / len(hyp_toks)
-    r = same / len(ref_toks)
-    return
-
-def bert_score(hyps, refs):
-    bert_p, bert_r, bert_f = bert_score.score(hyps, refs, lang='en', rescale_with_baseline=True)
-    return bert_p, bert_r, bert_f
-
-
 def aggregate(words, metric_name, func=None):
     score = 0
     num_words = len(words)
@@ -30,30 +17,57 @@ def aggregate(words, metric_name, func=None):
     return score
 
 
-def new_predict(model_path, hyp, source):
+def predict(model_path, hyp, source):
     maskeval = MaskEval(fill_mask_model_name = model_path,
                         use_cache=False)
-    hyps = []
-    refs = []
+    # read hypothesis and reference files
+    hyps, refs = [], []
     with open(hyp) as hf, open(source) as sf:
         for sid, (h, s) in enumerate(zip(hf, sf)):
             hyps.append(h)
             refs.append(s)
-            if len(hyps) == 20:
+            if len(hyps) == 5:
                 break
-    score, logs = maskeval.corpus_questeval(hypothesis=hyps, references=refs)
 
-    # make sure in correct order
+    # make predictions and get scores (stored in log files)
+    _, logs = maskeval.corpus_questeval(hypothesis=hyps, references=refs)
 
-    print('exact\tpredmean\tminpred\tmaxpred')
+    # go through log files and print out all scores for each example
+    headers, printed_headers = '', False
     for l, log in enumerate(logs):
-        exact_match_score = aggregate(log['masked'], 'exact_match')
-        mean_pred_score = aggregate(log['masked'], 'pred_scores', np.mean)
-        min_pred_score = aggregate(log['masked'], 'pred_scores', np.min)
-        max_pred_score = aggregate(log['masked'], 'pred_scores', np.max)
+        example = []
+        print(log)
+
+        # exact match scores (averaged over all words)
+        example.append(round(aggregate(log['masked'], 'exact_match'), 4))
+        headers += 'exact'
+
+        # logit scores of predicted words and scores of gold words
+        for name_score in 'pred_scores', 'gold_scores':
+            # different aggregation functions tested
+            for agg_func in np.mean, np.min, np.max:
+                example.append(round(aggregate(log['masked'], name_score, agg_func), 4))
+                headers += '\t' + name_score + '_' + agg_func.__name__
+
+        # bert-score aggregate scores comparing each predicted word with its ground truth
+        headers += 'bertscore_labels'
+        # different aggregation functions tested
+        for agg_func in np.mean, np.min, np.max:
+            for berttype in 'precision', 'recall', 'fscore':
+                all_scores = [w['bertscore'][berttype] for w in log['masked']]
+                example.append(agg_func(all_scores))
+                headers += '\tbertscore_' + agg_func.__name__
+        # bert-score on whole predicted sequences (i.e. if we take each masked predictions and treat it as a sequence
+        # to beb compared to the other sequence (tested this out)
+        for berttype in 'bertscore_hyp_mlmpred', 'bertscore_ref_mlmpred', 'bertscore_ref_hyp':
+            example.append(log['comparison_metrics'][berttype])
+            headers += '\t' + berttype
         
-        example = [round(exact_match_score, 4), round(mean_pred_score, 4),
-                   round(min_pred_score, 4), round(max_pred_score, 4)]
+        # print headers first time
+        if not printed_headers:
+            print(headers.strip())
+            printed_headers = True
+        # print example scores
         print('\t'.join([str(x) for x in example]))
 
 
@@ -66,4 +80,4 @@ if __name__ == '__main__':
     parser.add_argument('source')
     args = parser.parse_args()
 
-    new_predict(args.model, args.hyp, args.source)
+    predict(args.model, args.hyp, args.source)

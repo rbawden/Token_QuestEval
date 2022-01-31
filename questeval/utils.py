@@ -12,7 +12,6 @@ import spacy
 from spacy.lang.id import Indonesian
 from spacy.lang.tr import Turkish
 
-
 MODEL_CLASSES = {
     "t5": (T5ForConditionalGeneration, T5TokenizerFast),
     "mt5": (MT5ForConditionalGeneration, MT5TokenizerFast),
@@ -237,8 +236,10 @@ class API_T2T:
                 labels.append(label_str)
                 mask_tags.append(mask_dict["masking"])
 
+        label_ids = self.tokenizer(['<pad> <extra_id_0> '+ x + ' <extra_id_1> </s>' for x in labels], padding=True).input_ids
+        input_batch['label_ids'] = label_ids
         return input_batch, labels, mask_tags, word_numbers
-
+    
     def predict(self, text_pairs: dict):
         # text_pairs should be a list of dict, each dict being of the form:
         #{"hypothesis": str,
@@ -251,6 +252,7 @@ class API_T2T:
         all_mask_tags = []
         all_word_numbers = [] #number each text pairs produced
         all_pred_scores = []
+        all_gold_scores = []
 
         for i in range(0, len(text_pairs), self.text_pair_batch_size):
 
@@ -275,21 +277,9 @@ class API_T2T:
                         output_scores=True,
                         return_dict_in_generate=True
                     )
-                    # prediction scores (start from index 2 each time)
-                    these_pred_scores = [[] for i in range(len(dict_generated_ids['sequences']))]
-                    # go through from 0 to max length of predictions (ignore first 2, which are always the same)
-                    for i in range(2, len(dict_generated_ids['scores'])):
-                        # softmax scores first
-                        scores = nn.functional.log_softmax(dict_generated_ids['scores'][i], dim=-1)
-                        idxs = dict_generated_ids['sequences'].t()[i]
-                        # select the scores corresponding to the indices of the predicted subwords
-                        pred_scores = scores.gather(-1, idxs.unsqueeze(0)).squeeze(0)
-                        # store prediction scores for each predicted subword
-                        for p in range(pred_scores.shape[-1]):
-                            # exclude special tokens and padding
-                            if idxs[p].item() not in [0, 1, 32099]:
-                                these_pred_scores[p].append(pred_scores[p].item())
-
+                    these_pred_scores = self.extract_label_scores(dict_generated_ids['scores'], dict_generated_ids['sequences'])
+                    all_pred_scores.extend(these_pred_scores)
+                    
                     # generate answers + compute answerability
                     gen_text = self.tokenizer.batch_decode(
                         dict_generated_ids['sequences'],
@@ -298,18 +288,28 @@ class API_T2T:
                     )
 
                     preds += gen_text
-                    all_pred_scores.extend(these_pred_scores)
+
+                    # get scores of gold labels
+                    gold_label_ids = torch.tensor(input_batch["label_ids"][k: k+self.model_batch_size])
+                    gold_logits = self.model(input_ids=input_ids.to(self.model.device),
+                                             labels=gold_label_ids.to(self.model.device),
+                                             attention_mask=attention_mask.to(self.model.device)).logits
+                    list_gold_logits = [gold_logits[x] for x in range(gold_logits.shape[0])]
+                    these_gold_scores = self.extract_label_scores(list_gold_logits, gold_label_ids.to(self.model.device))
+                    all_gold_scores.extend(these_gold_scores)
 
         assert len(preds) == len(all_labels)
         assert len(preds) == len(all_mask_tags)
         assert len(all_word_numbers) == len(text_pairs)
         assert sum(all_word_numbers) == len(preds)
         assert len(all_pred_scores) == len(all_labels)
+        assert len(all_gold_scores) == len(all_labels)
 
         outputs = []
         for k in range(len(preds)):
             output = {
                 "pred_scores": all_pred_scores[k],
+                "gold_scores": all_gold_scores[k],
                 "prediction": preds[k],
                 "ground_truth": all_labels[k],
                 "masking": all_mask_tags[k],
@@ -335,3 +335,27 @@ class API_T2T:
 
         return categorized_outputs
 
+
+    def extract_label_scores(self, all_scores, all_idxs):
+        '''
+        all_scores: list of scores produced by the model
+        all_idxs: list of idxs (labels of which scores should be extracted)
+        '''
+        # prediction scores (start from index 2 each time)
+        all_label_scores = [[] for i in range(len(all_idxs))]
+        # go through from 0 to max length of predictions (ignore first 2, which are always the same)
+        #for i in range(2, len(dict_generated_ids['scores'])):
+        for i in range(2, len(all_scores)):
+            # softmax scores first
+            #scores = nn.functional.log_softmax(dict_generated_ids['scores'][i], dim=-1)
+            example_scores = nn.functional.log_softmax(all_scores[i], dim=-1)
+            #idxs = dict_generated_ids['sequences'].t()[i]
+            idxs = all_idxs.t()[i]
+            # select the scores corresponding to the indices of the predicted subwords
+            label_scores = example_scores.gather(-1, idxs.unsqueeze(0)).squeeze(0)
+            # store prediction scores for each predicted subword
+            for p in range(label_scores.shape[-1]):
+                # exclude special tokens and padding
+                if idxs[p].item() not in [0, 1, 32099]:
+                    all_label_scores[p].append(label_scores[p].item())
+        return all_label_scores
