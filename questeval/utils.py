@@ -277,16 +277,15 @@ class API_T2T:
                         output_scores=True,
                         return_dict_in_generate=True
                     )
-                    these_pred_scores = self.extract_label_scores(dict_generated_ids['scores'], dict_generated_ids['sequences'])
+                    these_pred_scores = self.extract_pred_label_scores(dict_generated_ids['scores'], dict_generated_ids['sequences'])
                     all_pred_scores.extend(these_pred_scores)
-                    
+
                     # generate answers + compute answerability
                     gen_text = self.tokenizer.batch_decode(
                         dict_generated_ids['sequences'],
                         skip_special_tokens=True,
                         clean_up_tokenization_spaces=True
                     )
-
                     preds += gen_text
 
                     # get scores of gold labels
@@ -295,7 +294,7 @@ class API_T2T:
                                              labels=gold_label_ids.to(self.model.device),
                                              attention_mask=attention_mask.to(self.model.device)).logits
                     list_gold_logits = [gold_logits[x] for x in range(gold_logits.shape[0])]
-                    these_gold_scores = self.extract_label_scores(list_gold_logits, gold_label_ids.to(self.model.device))
+                    these_gold_scores = self.extract_gold_label_scores(list_gold_logits, gold_label_ids.to(self.model.device))
                     all_gold_scores.extend(these_gold_scores)
 
         assert len(preds) == len(all_labels)
@@ -335,27 +334,45 @@ class API_T2T:
 
         return categorized_outputs
 
-
-    def extract_label_scores(self, all_scores, all_idxs):
+    def extract_gold_label_scores(self, all_scores, all_idxs):
         '''
-        all_scores: list of scores produced by the model
-        all_idxs: list of idxs (labels of which scores should be extracted)
+        all_scores: list of n tensors (k,v)
+                        where n=num examples, k=number of toks, v=vocab size
+        all_idxs: (n, k) tensor 
+        '''
+        all_label_scores = []
+        # go through all examples (one list per example)
+        for ex_id in range(len(all_scores)):
+            # get softmax scores for each token in example
+            example_scores = nn.functional.log_softmax(all_scores[ex_id], dim=-1)
+            # get gold label indices for each token in example
+            idxs = all_idxs[ex_id]
+            # select the scores corresponding to the indices of the predicted subwords
+            label_scores = example_scores.gather(-1, idxs.unsqueeze(0)).squeeze(0)
+            # store scores for each token (ignoring padding and special tokens)
+            all_label_scores.append([label_scores[s].item() for s in range(len(label_scores)) if idxs[s] not in [0, 1, 32099, 32098]])
+        return all_label_scores
+
+    def extract_pred_label_scores(self, all_scores, all_idxs):
+        '''
+        all_scores: list of k tensors (n, v)
+                        where n=num examples, k=number of toks, v=vocab size
+        all_idxs: (n, k) tensor
         '''
         # prediction scores (start from index 2 each time)
         all_label_scores = [[] for i in range(len(all_idxs))]
-        # go through from 0 to max length of predictions (ignore first 2, which are always the same)
-        #for i in range(2, len(dict_generated_ids['scores'])):
-        for i in range(2, len(all_scores)):
+        # go through from 0 to max length of predictions 
+        # (ignore first 2, which are always the same). 
+        # Also, the scores do not contain scores for the first index, so use i-1 for indexing
+        for tok_id in range(2, len(all_scores)):
             # softmax scores first
-            #scores = nn.functional.log_softmax(dict_generated_ids['scores'][i], dim=-1)
-            example_scores = nn.functional.log_softmax(all_scores[i], dim=-1)
-            #idxs = dict_generated_ids['sequences'].t()[i]
-            idxs = all_idxs.t()[i]
+            example_scores = nn.functional.log_softmax(all_scores[tok_id-1], dim=-1)
+            idxs = all_idxs.t()[tok_id]
             # select the scores corresponding to the indices of the predicted subwords
             label_scores = example_scores.gather(-1, idxs.unsqueeze(0)).squeeze(0)
             # store prediction scores for each predicted subword
             for p in range(label_scores.shape[-1]):
                 # exclude special tokens and padding
-                if idxs[p].item() not in [0, 1, 32099]:
+                if idxs[p].item() not in [0, 1, 32099, 32098]:
                     all_label_scores[p].append(label_scores[p].item())
         return all_label_scores

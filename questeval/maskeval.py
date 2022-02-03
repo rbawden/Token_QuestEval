@@ -63,7 +63,6 @@ class MaskEval:
 
     def calculate_bertscore(self, preds, refs, lang='en'):
         assert lang in ['en', 'multilingual']
-
         if lang == 'en':
             scores = self.bertscore._compute(preds, refs, model_type='bert-base-uncased')
         else:
@@ -146,15 +145,20 @@ class MaskEval:
         # Calculate BERTscores between predicted labels and gold labels
         for k in range(len(logs)):
             pred_seq = ''
+            pred_labels = [logs[k]['masked'][w]['prediction'] for w in range(len(logs[k]['masked']))]
+            gold_labels = [logs[k]['masked'][w]['ground_truth'] for w in range(len(logs[k]['masked']))]
+            bertscores = self.calculate_bertscore(pred_labels, gold_labels)
+
             for w in range(len(logs[k]['masked'])):
-               bertscores = self.calculate_bertscore(logs[k]['masked'][w]['prediction'],
-                                                     logs[k]['masked'][w]['ground_truth'])
-               logs[k]['masked'][w]['bert_scores'] = bertscores
-               pred_seq += ' ' + logs[k]['masked'][w]['prediction']
+                logs[k]['masked'][w]['bert_scores'] = {}
+                for typescore in 'precision', 'recall', 'f1':
+                    logs[k]['masked'][w]['bert_scores'][typescore] = bertscores[typescore][w]
+
+                #pred_seq += ' ' + logs[k]['masked'][w]['prediction']
             # calculate BERTscore between concat of pred labels and original sequence
-            logs[k]['comparison_metrics']['bertscore_ref_mlmpred'] = self.calculate_bertscore(pred_seq.strip(), logs[k]['ref_text'])
-            logs[k]['comparison_metrics']['bertscore_ref_hyp'] = self.calculate_bertscore(logs[k]['hyp_text'], logs[k]['ref_text'])
-            logs[k]['comparison_metrics']['bertscore_hyp_mlmpred'] = self.calculate_bertscore(pred_seq.strip(), logs[k]['hyp_text'])
+            #logs[k]['comparison_metrics']['bertscore_ref_mlmpred'] = self.calculate_bertscore(pred_seq.strip(), logs[k]['ref_text'])
+            #logs[k]['comparison_metrics']['bertscore_ref_hyp'] = self.calculate_bertscore(logs[k]['hyp_text'], logs[k]['ref_text'])
+            #logs[k]['comparison_metrics']['bertscore_hyp_mlmpred'] = self.calculate_bertscore(pred_seq.strip(), logs[k]['hyp_text'])
         
         # Calculate Score
         scores = self._calculate_score_from_logs(logs)
