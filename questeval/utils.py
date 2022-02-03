@@ -164,6 +164,10 @@ class API_T2T:
                          "hyp_tokens": masked_seq,
                          "ref_tokens": ref_tokens}
 
+            print(masked_seq)
+            print(ref_tokens)
+            import pdb;pdb.set_trace()
+
             all_masked_seqs.append(mask_dict)
 
         # loop over all words in reference
