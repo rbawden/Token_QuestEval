@@ -23,7 +23,7 @@ for metric in $(cd $thisdir/../scores/$wmt; ls); do
     displayname=$(echo "$metric                                " | cut -c1-25)
     echo -n $displayname
 
-    for pair in $wmt_list; do #$(sacrebleu -t $wmt --list | sort); do
+    for pair in $wmt_list; do 
         # Create a cache of the scores for this metric, so future runs are fast
         cachefile=$thisdir/../scores/$wmt/$metric/$pair/cache.seg
         if [[ -s $cachefile ]]; then
@@ -32,7 +32,8 @@ for metric in $(cd $thisdir/../scores/$wmt; ls); do
         else
             # if the cache isn't there, create it
             if [[ -e $thisdir/../data/metrics/$wmt/gold/segment/$pair.csv ]]; then
-                score=$(python3 $thisdir/to_agree_file.py $thisdir/../data/metrics/$wmt/ref/segment/$pair.csv $wmt/$metric/$pair $metric)
+                score=$(python3 $thisdir/to_agree_file.py $thisdir/../data/metrics/$wmt/gold/segment/$pair.csv \
+				$thisdir/../scores/$wmt/$metric/$pair $metric)
             else
                 score="-"
             fi
