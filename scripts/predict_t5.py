@@ -36,8 +36,10 @@ def predict(model_path, hyp, source):
     headers, printed_headers = '', False
     for l, log in enumerate(logs):
         example = []
-        print(log)
+        print(json.dumps(log))
 
+
+        continue
         # exact match scores (averaged over all words)
         example.append(round(aggregate(log['masked'], 'exact_match'), 4))
         headers += 'exact'
@@ -59,9 +61,9 @@ def predict(model_path, hyp, source):
                 headers += '\tbertscore_' + agg_func.__name__
         # bert-score on whole predicted sequences (i.e. if we take each masked predictions and treat it as a sequence
         # to beb compared to the other sequence (tested this out)
-        for berttype in 'bertscore_hyp_mlmpred', 'bertscore_ref_mlmpred', 'bertscore_ref_hyp':
-            example.append(log['comparison_metrics'][berttype])
-            headers += '\t' + berttype
+        #for berttype in 'bertscore_hyp_mlmpred', 'bertscore_ref_mlmpred', 'bertscore_ref_hyp':
+        #    example.append(log['comparison_metrics'][berttype])
+        #    headers += '\t' + berttype
         
         # print headers first time
         if not printed_headers:
