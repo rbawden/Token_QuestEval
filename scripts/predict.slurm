@@ -12,7 +12,7 @@
 #SBATCH --time=20:00:00        # Temps d’exécution maximum demande (HH:MM:SS)
 #SBATCH --output=seg%x_%j.out  # Nom du fichier de sortie contenant l'ID et l'indice
 #SBATCH --error=seg%x_%j.out   # Nom du fichier d'erreur (ici commun avec la sortie)
-##SBATCH --array=0-232%25         # 6 travaux ayant les indices 0, 2, 4, 6, 8, et 10
+##SBATCH --array=1-340%25
 
 # go into the submission directory 
 cd ${SLURM_SUBMIT_DIR}
@@ -31,8 +31,25 @@ module load boost/1.74.0
 eval "$(/gpfslocalsup/pub/anaconda-py3/2020.02/bin/conda shell.bash hook)"
 conda activate py38
 
-#bash scripts/metric-score-ref.sh mask-base-hyp-ref
-echo -e "Oh , darling , what happened ? \t Oh , honey , what 's the matter with you ?" | TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 python -u scripts/predict.py > out
+year=20
+dset=test
 
-#paste <(head data/metrics/wmt20/hyp/de-en/newstest2020.Huoshan_Translate.789.de-en.en) <(head data/metrics/wmt20/ref/newstest2020-deen-ref.en) | \
-#    TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 python -u scripts/predict.py > out
+n=1 #$SLURM_ARRAY_TASK_ID 
+
+hyp_file=`ls -1 $maindir/data/metrics/wmt$year/hyp/*-en/* | cat -n | sed -n "${n},${n}p" | cut -d'	' -f2`
+echo $hyp_file
+langpair=`echo $hyp_file | sed -E "s/^.+?\/hyp\/(.+?)\/news$dset20$year.+?$/\1/"`
+trg=`echo $langpair | cut -d"-" -f2`
+sysid=`echo $hyp_file | sed -E "s/^.+?\/$lp\/news$dset20$year\.(.+?)\.$lp/\1/"`
+ref_file=$maindir/data/metrics/wmt$year/ref/newstest20$year.$lp.ref.$trg
+
+
+echo $ref_file
+#hyp=$maindir/data/metrics/wmt$year/hyp/newstest2021.HuaweiTSC.ha-en
+#ref=$maindir/data/metrics/wmt$year/ref/newstest2021.ha-en.ref.A.en \
+
+[ -d $maindir/scores/wmt$year/token-eval/$langpair ] || mkdir -p $maindir/scores/wmt$year/token-eval/$langpair
+
+TRANSFORMERS_OFFLINE=1 HF_DATASETS_OFFLINE=1 python $maindir/scripts/predict_t5.py \
+		    $maindir/models/train_t5_parabank1/checkpoint-395000/ "$hyp_file" "$ref_file" \
+		    > $maindir/scores/wmt$year/token-eval/$langpair/$sysid.seg.all-scores
