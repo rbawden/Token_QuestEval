@@ -203,11 +203,7 @@ class MaskEval:
     def _compute_answer_similarity(self, logs):
         for log in logs:
             for l in log["masked"]:
-                l["prediction_eval_metrics"] = {
-                    "exact_match": self._exact_match(prediction = l["prediction"],
-                                                     ground_truth = l["ground_truth"])
-                }
-
+                l["prediction_eval_metrics"]["exact_match"] = self._exact_match(prediction = l["prediction"], ground_truth = l["ground_truth"])
             log["answ_sim_computed"] = True
 
     def _calculate_score_from_logs(self, logs):
