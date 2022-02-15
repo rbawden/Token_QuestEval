@@ -12,6 +12,7 @@ from questeval.utils import (
     API_T2T,
 )
 from datasets import load_metric
+from transformers import T5TokenizerFast
 
 def text2hash(string: str) -> str:
     hash_object = hashlib.sha512(string.encode('utf-8'))
@@ -22,7 +23,7 @@ def text2hash(string: str) -> str:
 class MaskEval:
     def __init__(
         self,
-        fill_mask_model_name,
+        fill_mask_model_name = "/home/mila/y/yu-lu.liu/Token_QuestEval/models/t5_config_1_50K/checkpoint-15000",
         language: str = "en",
         no_cuda: bool = False,
         use_cache: bool = True,
@@ -30,12 +31,14 @@ class MaskEval:
         sliding_window_size: int=24,
         mask_types_to_consider = ("hyp", "ref",),
         answer_sim_metrics = ("exact_match",),
+        order: str = "hyp_first",
     ) -> None:
 
         #NEEDED
         self.sep = "<sep>"
         self.device = 'cuda' if (torch.cuda.is_available() and not no_cuda) else 'cpu'
         self.model_batch_size = model_batch_size
+        self.order = order
         self.sliding_window_size = sliding_window_size
         self.fill_mask_model = self.get_model(fill_mask_model_name)
 
@@ -46,6 +49,7 @@ class MaskEval:
         self.mask_types_to_consider = mask_types_to_consider
         self.answer_sim_metrics = answer_sim_metrics
         self.bertscore = load_metric("bertscore")
+        self.truncate_tokenizer = T5TokenizerFast.from_pretrained('t5-base')
 
     def get_model(self, model_name: str, ):
         if 't5' in model_name.lower():
@@ -54,6 +58,7 @@ class MaskEval:
                 max_seq_length=512,
                 model_batch_size=self.model_batch_size,
                 sliding_window_size=self.sliding_window_size,
+                order = self.order,
                 device=self.device
             )
         else:
@@ -68,8 +73,29 @@ class MaskEval:
         else:
             scores = self.bertscore._compute(preds, refs, model_type='bert-base-multilingual-cased')
         return scores
-    
-            
+
+    def truncate(self, text_pairs):
+        truncated_text_pairs = []
+        t5_tokenizer = self.truncate_tokenizer
+
+        for text_pair in text_pairs:
+            trucated_hyp_ids = t5_tokenizer(text_pair['hypothesis'], max_length=120, truncation=True)['input_ids']
+            trucated_hyp = t5_tokenizer.decode(trucated_hyp_ids)
+
+            trucated_src_ids = t5_tokenizer(text_pair['reference'], max_length=380, truncation=True)['input_ids']
+            trucated_src = t5_tokenizer.decode(trucated_src_ids)
+
+            truncated_text_pair = {
+                "hypothesis": trucated_hyp,
+                "reference": trucated_src,
+                "hyp_lang": text_pair["hyp_lang"],
+                "ref_lang": text_pair["ref_lang"]
+            }
+
+            truncated_text_pairs.append(truncated_text_pair)
+
+        return truncated_text_pairs
+
     def corpus_questeval(
             self,
             hypothesis: List[str],
@@ -113,6 +139,7 @@ class MaskEval:
     ) -> List[float]:
 
         d_loaded_logs = dict()
+        #text_pairs = self.truncate(text_pairs)
         logs, logs_hashes = self._load_logs(text_pairs, d_loaded_logs)
         self._serialize_logs(logs, logs_hashes)
 
@@ -156,9 +183,9 @@ class MaskEval:
 
                 #pred_seq += ' ' + logs[k]['masked'][w]['prediction']
             # calculate BERTscore between concat of pred labels and original sequence
-            #logs[k]['comparison_metrics']['bertscore_ref_mlmpred'] = self.calculate_bertscore(pred_seq.strip(), logs[k]['ref_text'])
-            #logs[k]['comparison_metrics']['bertscore_ref_hyp'] = self.calculate_bertscore(logs[k]['hyp_text'], logs[k]['ref_text'])
-            #logs[k]['comparison_metrics']['bertscore_hyp_mlmpred'] = self.calculate_bertscore(pred_seq.strip(), logs[k]['hyp_text'])
+            #logs[k]['prediction_eval_metrics']['bertscore_ref_mlmpred'] = self.calculate_bertscore(pred_seq.strip(), logs[k]['ref_text'])
+            #logs[k]['prediction_eval_metrics']['bertscore_ref_hyp'] = self.calculate_bertscore(logs[k]['hyp_text'], logs[k]['ref_text'])
+            #logs[k]['prediction_eval_metrics']['bertscore_hyp_mlmpred'] = self.calculate_bertscore(pred_seq.strip(), logs[k]['hyp_text'])
         
         # Calculate Score
         scores = self._calculate_score_from_logs(logs)
@@ -176,7 +203,7 @@ class MaskEval:
     def _compute_answer_similarity(self, logs):
         for log in logs:
             for l in log["masked"]:
-                l["comparison_metrics"] = {
+                l["prediction_eval_metrics"] = {
                     "exact_match": self._exact_match(prediction = l["prediction"],
                                                      ground_truth = l["ground_truth"])
                 }
@@ -205,9 +232,9 @@ class MaskEval:
         metric_scores = []
         for metric in self.answer_sim_metrics:
             for l in log["masked"]:
-                if l["masking"] == masking_type and len(l["ground_truth"]) > 0:
-                    if metric in l["comparison_metrics"]:
-                        metric_scores.append(l["comparison_metrics"][metric])
+                if l["masking"] == masking_type:
+                    if metric in l["prediction_eval_metrics"]:
+                        metric_scores.append(l["prediction_eval_metrics"][metric])
                     else:
                         logging.warning(f"answer similarity metric {metric} is not in the logs. Setting the metric score to 0. ")
                         metric_scores.append(0)

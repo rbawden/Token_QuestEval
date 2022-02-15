@@ -58,7 +58,8 @@ class API_T2T:
         pretrained_model_name_or_path: str,
         max_seq_length: int,
         model_batch_size: int,
-        sliding_window_size: int,  # Note: will work only if beamsize == 1
+        sliding_window_size: int,
+        order: str = "ref_first",
         device: str = "cuda"
     ) -> None:
 
@@ -86,6 +87,7 @@ class API_T2T:
         if device == "cuda":
             self.model.cuda()
 
+        self.order = order
         self.tokenizer_indices = {
             "<extra_id_0>": self.tokenizer.convert_tokens_to_ids("<extra_id_0>"),
             "<extra_id_1>": self.tokenizer.convert_tokens_to_ids("<extra_id_1>"),
@@ -101,7 +103,7 @@ class API_T2T:
 
         t5_result = t5_tokenizer(sentence, return_offsets_mapping=True)
         t5_tok = t5_result['input_ids']
-        spacy_tok = [(t.text, t.idx) for t in spacy_tokenizer(sentence)]
+        spacy_tok = [(t.text, t.idx, t.pos_) for t in spacy_tokenizer(sentence)]
 
         # Get the mapping for both t5 and spacy tokenization, and then the INTERSECTION of both
         t5_idxs = [t[1] for t in t5_result['offset_mapping']]
@@ -109,17 +111,40 @@ class API_T2T:
         t5_tok_idx_pairs = list(zip(t5_tok, t5_idxs))
         spacy_idxs = [t[1] + len(t[0]) for t in spacy_tok]
 
+        # Get the mapping between POS_tags and new spacy idx
+        pos_idx_mapping = []
+        for t, idx in zip(spacy_tok, spacy_idxs):
+            pos_idx_mapping.append((t[2], idx))
+
+        # Compute intersection
         intersection = sorted(list(set(t5_idxs) & set(spacy_idxs)))
 
-        word_list = []
+        # Create dict of words
+        word_dict = {}
         sublist = []
+
         for tok, idx in t5_tok_idx_pairs:
             sublist.append(tok)
             if idx in intersection:
-                word_list.append(sublist)
+                if idx not in word_dict:
+                    word_dict[idx] = sublist
+                else:
+                    word_dict[idx] = word_dict[idx] + sublist
                 sublist = []
 
-        return word_list
+        # Create list of POS tags
+        pos_dict = {}
+        sublist = []
+        for pos_tag, idx in pos_idx_mapping:
+            sublist.append(pos_tag)
+            if idx in intersection:
+                if idx not in pos_dict:
+                    pos_dict[idx] = sublist
+                else:
+                    pos_dict[idx] = pos_dict[idx] + sublist
+                sublist = []
+
+        return list(word_dict.values()), list(pos_dict.values())
 
     def get_all_masked_sequences(self, text_pair):
         hypothesis = text_pair["hypothesis"]
@@ -128,8 +153,8 @@ class API_T2T:
         ref_lang = text_pair["ref_lang"]
 
         # get the list of words (intersection of spaCy and T5 tokenization)
-        hyp_word_list = self.get_word_list(hypothesis, SPACY_PIPELINES[hyp_lang])
-        ref_word_list = self.get_word_list(reference, SPACY_PIPELINES[ref_lang])
+        hyp_word_list, hyp_pos_tags = self.get_word_list(hypothesis, SPACY_PIPELINES[hyp_lang])
+        ref_word_list, ref_pos_tags = self.get_word_list(reference, SPACY_PIPELINES[ref_lang])
 
         ref_tokens = [item for sublist in ref_word_list for item in sublist]
         hyp_tokens = [item for sublist in hyp_word_list for item in sublist]
@@ -140,6 +165,7 @@ class API_T2T:
         for index in range(len(hyp_word_list)):
             label = [self.tokenizer_indices["<extra_id_0>"]] + hyp_word_list[index] \
                     + [self.tokenizer_indices["<extra_id_1>"], self.tokenizer_indices["</s>"]]
+            label_pos = hyp_pos_tags[index]
 
             copy_hyp_word_list = hyp_word_list.copy()
             copy_hyp_word_list[index] = self.tokenizer_indices["<extra_id_0>"]
@@ -160,6 +186,7 @@ class API_T2T:
             ref_tokens = ref_tokens[:ref_length]
 
             mask_dict = {"masking": "hyp",
+                         "label_pos": label_pos,
                          "label_tokens": label,
                          "hyp_tokens": masked_seq,
                          "ref_tokens": ref_tokens}
@@ -170,6 +197,7 @@ class API_T2T:
         for index in range(len(ref_word_list)):
             label = [self.tokenizer_indices["<extra_id_0>"]] + ref_word_list[index] \
                     + [self.tokenizer_indices["<extra_id_1>"], self.tokenizer_indices["</s>"]]
+            label_pos = ref_pos_tags[index]
 
             copy_ref_word_list = ref_word_list.copy()
             copy_ref_word_list[index] = self.tokenizer_indices["<extra_id_0>"]
@@ -190,24 +218,25 @@ class API_T2T:
             hyp_tokens = hyp_tokens[:hyp_length]
 
             mask_dict = {"masking": "ref",
+                         "label_pos": label_pos,
                          "label_tokens": label,
                          "hyp_tokens": hyp_tokens,
                          "ref_tokens": masked_seq}
 
             all_masked_seqs.append(mask_dict)
-
         return all_masked_seqs
 
-    def preprocess_batch(self, batch, order="hyp_first"):
+    def preprocess_batch(self, batch):
         # set order = "focus-first" to do: focus <sep> context
         # set order = "hyp_first" to do: hypothesis <sep> reference/source
-
+        order = self.order
         input_batch = {
             "input_ids": [],
             "attention_mask": []
         }
         labels = []
         mask_tags = []
+        pos_tags = []
         word_numbers = []
 
         for text_pair in batch:
@@ -217,6 +246,9 @@ class API_T2T:
                 if order == "hyp_first":
                     input_ids = mask_dict["hyp_tokens"] + [self.tokenizer_indices["<sep>"]] + mask_dict[
                         "ref_tokens"] + [self.tokenizer_indices["</s>"]]
+                elif order == "ref_first":
+                    input_ids = mask_dict["ref_tokens"][:-1] + [self.tokenizer_indices["<sep>"]] + mask_dict[
+                        "hyp_tokens"][:-1] + [self.tokenizer_indices["</s>"]]
                 else:
                     if mask_dict["masking"] == "hyp":
                         input_ids = mask_dict["hyp_tokens"] + [self.tokenizer_indices["<sep>"]] + mask_dict[
@@ -233,12 +265,14 @@ class API_T2T:
 
                 input_batch["input_ids"].append(input_ids)
                 input_batch["attention_mask"].append(attention_mask)
+
                 labels.append(label_str)
+                pos_tags.append(mask_dict["label_pos"])
                 mask_tags.append(mask_dict["masking"])
 
         label_ids = self.tokenizer(['<pad> <extra_id_0> '+ x + ' <extra_id_1> </s>' for x in labels], padding=True).input_ids
         input_batch['label_ids'] = label_ids
-        return input_batch, labels, mask_tags, word_numbers
+        return input_batch, labels, mask_tags, word_numbers, pos_tags
     
     def predict(self, text_pairs: dict):
         # text_pairs should be a list of dict, each dict being of the form:
@@ -250,6 +284,7 @@ class API_T2T:
         preds = []
         all_labels = []
         all_mask_tags = []
+        all_pos_tags = []
         all_word_numbers = [] #number each text pairs produced
         all_pred_scores = []
         all_gold_scores = []
@@ -257,10 +292,11 @@ class API_T2T:
         for i in range(0, len(text_pairs), self.text_pair_batch_size):
 
             batch = text_pairs[i: i+self.text_pair_batch_size]
-            input_batch, labels, mask_tags, word_numbers = self.preprocess_batch(batch)
+            input_batch, labels, mask_tags, word_numbers, pos_tags = self.preprocess_batch(batch)
             all_word_numbers = all_word_numbers + word_numbers
             all_labels = all_labels + labels
             all_mask_tags = all_mask_tags + mask_tags
+            all_pos_tags = all_pos_tags + pos_tags
 
             for k in range(0, len(labels), self.model_batch_size):
                 with torch.no_grad():
@@ -299,6 +335,7 @@ class API_T2T:
 
         assert len(preds) == len(all_labels)
         assert len(preds) == len(all_mask_tags)
+        assert len(preds) == len(all_pos_tags)
         assert len(all_word_numbers) == len(text_pairs)
         assert sum(all_word_numbers) == len(preds)
         assert len(all_pred_scores) == len(all_labels)
@@ -307,13 +344,14 @@ class API_T2T:
         outputs = []
         for k in range(len(preds)):
             output = {
-                "pred_scores": all_pred_scores[k],
-                "gold_scores": all_gold_scores[k],
                 "prediction": preds[k],
                 "ground_truth": all_labels[k],
                 "masking": all_mask_tags[k],
-                "comparison_metrics": {}, #TODO: any perplexity-related metrics should be added here
-                "POS_tag": "NA", #TODO
+                "prediction_eval_metrics": {
+                    "pred_scores": all_pred_scores[k],
+                    "gold_scores": all_gold_scores[k]
+                },
+                "POS_tag": all_pos_tags[k], 
                 "weight": 0.0
             }
 
@@ -330,7 +368,12 @@ class API_T2T:
             left_index = right_index
 
         for (l, r) in indices:
-            categorized_outputs.append(outputs[l:r])
+            all_outputs = outputs[l:r]
+            filtered_outputs = []
+            for o in all_outputs:
+                if len(o["ground_truth"]) > 0: #filter out ground truths of empty strings
+                    filtered_outputs.append(o)
+            categorized_outputs.append(filtered_outputs)
 
         return categorized_outputs
 

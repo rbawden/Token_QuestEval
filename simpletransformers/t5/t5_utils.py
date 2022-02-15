@@ -107,10 +107,12 @@ def resize(original_list, desired_len):
 
     return output
 
-def get_word_list(sentence, t5_tokenizer, spacy_tokenizer):
+def get_word_list(self, sentence, spacy_tokenizer):
+    t5_tokenizer = self.tokenizer
+
     t5_result = t5_tokenizer(sentence, return_offsets_mapping=True)
     t5_tok = t5_result['input_ids']
-    spacy_tok = [(t.text, t.idx) for t in spacy_tokenizer(sentence)]
+    spacy_tok = [(t.text, t.idx, t.pos_) for t in spacy_tokenizer(sentence)]
 
     # Get the mapping for both t5 and spacy tokenization, and then the INTERSECTION of both
     t5_idxs = [t[1] for t in t5_result['offset_mapping']]
@@ -118,17 +120,23 @@ def get_word_list(sentence, t5_tokenizer, spacy_tokenizer):
     t5_tok_idx_pairs = list(zip(t5_tok, t5_idxs))
     spacy_idxs = [t[1] + len(t[0]) for t in spacy_tok]
 
+    # Compute intersection
     intersection = sorted(list(set(t5_idxs) & set(spacy_idxs)))
 
-    word_list = []
+    # Create dict of words
+    word_dict = {}
     sublist = []
+
     for tok, idx in t5_tok_idx_pairs:
         sublist.append(tok)
         if idx in intersection:
-            word_list.append(sublist)
+            if idx not in word_dict:
+                word_dict[idx] = sublist
+            else:
+                word_dict[idx] = word_dict[idx] + sublist
             sublist = []
 
-    return word_list
+    return list(word_dict.values())
 
 def get_all_masked_sequences(hypothesis, reference, hyp_lang, ref_lang, t5_tokenizer, args):
     #get the list of words (intersection of spaCy and T5 tokenization)
@@ -232,9 +240,9 @@ def get_masked_sequence(focus, context, focus_lang, context_lang, t5_tokenizer, 
 
   return focus_tokens, context_tokens, label
 
-def preprocess_for_pred(batch, tokenizer, args, order="hyp_first"):
-    # set order = "focus-first" to do: focus <sep> context
-    # set order = "hyp_first" to do: hypothesis <sep> reference/source
+def preprocess_for_pred(batch, tokenizer, args):
+
+    order = args.order
     input_batch = {
         "input_ids": [],
         "attention_mask": []
@@ -252,6 +260,9 @@ def preprocess_for_pred(batch, tokenizer, args, order="hyp_first"):
         for mask_dict in all_masked_seqs:
             if order == "hyp_first":
                 input_ids = mask_dict["hyp_tokens"] + [args.tokenizer_indices["<sep>"]] + mask_dict["ref_tokens"] + [args.tokenizer_indices["</s>"]]
+            elif order == "ref_first":
+                input_ids = mask_dict["ref_tokens"][:-1] + [args.tokenizer_indices["<sep>"]] + mask_dict["hyp_tokens"][:-1] + [
+                    args.tokenizer_indices["</s>"]]
             else:
                 if mask_dict["masking"] == "hyp":
                     input_ids = mask_dict["hyp_tokens"] + [args.tokenizer_indices["<sep>"]] + mask_dict["ref_tokens"] + [args.tokenizer_indices["</s>"]]
@@ -271,11 +282,9 @@ def preprocess_for_pred(batch, tokenizer, args, order="hyp_first"):
 
     return input_batch, labels, mask_tags
 
-def preprocess_data(data, order="hyp_first"):
-    # set order = "focus-first" to do: focus <sep> context
-    # set order = "hyp_first" to do: hypothesis <sep> reference/source
+def preprocess_data(data):
     example, tokenizer, args = data
-
+    order = args.order
     if order == "hyp_first":
         # randomly decide whether hyp or ref is the focus/going to be masked
         if random.randint(0, 1) == 0:
@@ -294,7 +303,23 @@ def preprocess_data(data, order="hyp_first"):
                                                                 args = args)
 
         input_ids = hyp_tokens + [args.tokenizer_indices["<sep>"]] + ref_tokens + [args.tokenizer_indices["</s>"]]
+    elif order == "ref_first":
+        if random.randint(0, 1) == 0:
+            hyp_tokens, ref_tokens, label = get_masked_sequence(focus=example['hypothesis'],
+                                                                context=example['reference'],
+                                                                focus_lang=example['hyp_lang'],
+                                                                context_lang=example['ref_lang'],
+                                                                t5_tokenizer=tokenizer,
+                                                                args=args)
+        else:
+            ref_tokens, hyp_tokens, label = get_masked_sequence(focus=example['reference'],
+                                                                context=example['hypothesis'],
+                                                                focus_lang=example['ref_lang'],
+                                                                context_lang=example['hyp_lang'],
+                                                                t5_tokenizer=tokenizer,
+                                                                args=args)
 
+        input_ids = ref_tokens[:-1] + [args.tokenizer_indices["<sep>"]] + hyp_tokens[:-1] + [args.tokenizer_indices["</s>"]]
     else:  # order = focus hyp_first
         if random.randint(0, 1) == 0:
             focus_tokens, context_tokens, label = get_masked_sequence(focus=example['hypothesis'],

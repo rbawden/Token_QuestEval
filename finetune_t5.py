@@ -25,7 +25,7 @@ def print_memory():
     logging.info('Memory: %s reserved, %s allocated, %s free', r, a, f)
 
 
-def train(data_filename, output_dir, nepochs=1, bsz=8, evalsteps=5000, savesteps=5000, sliding_window_size = 24):
+def train(data_filename, output_dir, nepochs=1, bsz=8, evalsteps=5000, savesteps=5000, sliding_window_size = 24, order = "hyp_first"):
     logging.basicConfig(level=logging.INFO)
     transformers_logger = logging.getLogger("transformers")
     transformers_logger.setLevel(logging.WARNING)
@@ -67,7 +67,7 @@ def train(data_filename, output_dir, nepochs=1, bsz=8, evalsteps=5000, savesteps
             filename = model_args.output_dir + '/checkpoint-' + str(num)
             training_progress_file = model_args.output_dir + '/training_progress_scores.csv'
             eval_results_file = model_args.output_dir + '/eval_results.txt'
-    model = T5Model("t5", filename, args=model_args, sliding_window_size = sliding_window_size)
+    model = T5Model("t5", filename, args=model_args, sliding_window_size = sliding_window_size, order = order)
 
     print_memory()
 
@@ -95,7 +95,8 @@ if __name__ == "__main__":
     parser.add_argument('--evalsteps', default=5000, type=int)
     parser.add_argument('--savesteps', default=5000, type=int)
     parser.add_argument('--sliding_window_size', default=24, type=int)
+    parser.add_argument('--order', default="hyp_first")
     args = parser.parse_args()
 
     os.sys.stderr.write('>> About to train\n')
-    train(args.data_prefix, args.output_dir, args.epochs, args.bsz, args.evalsteps, args.savesteps, args.sliding_window_size)
+    train(args.data_prefix, args.output_dir, args.epochs, args.bsz, args.evalsteps, args.savesteps, args.sliding_window_size, args.order)

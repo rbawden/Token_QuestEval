@@ -71,6 +71,7 @@ class T5Model:
             model_type,
             model_name,
             sliding_window_size = 24,
+            order = "hyp_first",
             args=None,
             tokenizer=None,
             use_cuda=True,
@@ -167,7 +168,7 @@ class T5Model:
             )
             self.args.wandb_project = None
         self.args.sliding_window_size = sliding_window_size
-
+        self.args.order = order
         self.args.tokenizer_indices = {
             "<extra_id_0>": self.tokenizer.convert_tokens_to_ids("<extra_id_0>"),
             "<extra_id_1>": self.tokenizer.convert_tokens_to_ids("<extra_id_1>"),
