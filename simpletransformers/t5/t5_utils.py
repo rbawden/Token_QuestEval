@@ -107,9 +107,7 @@ def resize(original_list, desired_len):
 
     return output
 
-def get_word_list(self, sentence, spacy_tokenizer):
-    t5_tokenizer = self.tokenizer
-
+def get_word_list(sentence, t5_tokenizer, spacy_tokenizer):
     t5_result = t5_tokenizer(sentence, return_offsets_mapping=True)
     t5_tok = t5_result['input_ids']
     spacy_tok = [(t.text, t.idx, t.pos_) for t in spacy_tokenizer(sentence)]
