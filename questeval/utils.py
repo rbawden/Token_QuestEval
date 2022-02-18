@@ -11,6 +11,7 @@ from transformers.models.mt5 import MT5ForConditionalGeneration, MT5TokenizerFas
 import spacy
 from spacy.lang.id import Indonesian
 from spacy.lang.tr import Turkish
+import os
 
 MODEL_CLASSES = {
     "t5": (T5ForConditionalGeneration, T5TokenizerFast),
@@ -82,7 +83,7 @@ class API_T2T:
         self.sliding_window_size = sliding_window_size
         self.max_seq_length = max_seq_length
         self.model_batch_size = model_batch_size
-        self.text_pair_batch_size = 4
+        self.text_pair_batch_size = 256
 
         if device == "cuda":
             self.model.cuda()
@@ -288,6 +289,10 @@ class API_T2T:
         all_word_numbers = [] #number each text pairs produced
         all_pred_scores = []
         all_gold_scores = []
+        all_gold_label_tok_ids = []
+        all_gold_label_toks = []
+        all_pred_tok_ids = []
+        all_pred_toks = []
 
         for i in range(0, len(text_pairs), self.text_pair_batch_size):
 
@@ -298,7 +303,9 @@ class API_T2T:
             all_mask_tags = all_mask_tags + mask_tags
             all_pos_tags = all_pos_tags + pos_tags
 
+            os.sys.stderr.write(str(i) + ', lentextpairs=' + str(len(text_pairs)) + ', textpairbsz=' + str(self.text_pair_batch_size) + '\n')
             for k in range(0, len(labels), self.model_batch_size):
+                os.sys.stderr.write('\tk=' + str(k) + ', lenlabels=' + str(len(labels)) + ', modelbsz=' + str(self.model_batch_size) + '\n')
                 with torch.no_grad():
                     input_ids = torch.tensor(input_batch["input_ids"][k: k+self.model_batch_size])
                     attention_mask = torch.tensor(input_batch["attention_mask"][k: k+self.model_batch_size])
@@ -316,6 +323,7 @@ class API_T2T:
                     these_pred_scores = self.extract_pred_label_scores(dict_generated_ids['scores'], dict_generated_ids['sequences'])
                     all_pred_scores.extend(these_pred_scores)
 
+                    #import pdb; pdb.set_trace()
                     # generate answers + compute answerability
                     gen_text = self.tokenizer.batch_decode(
                         dict_generated_ids['sequences'],
@@ -333,6 +341,18 @@ class API_T2T:
                     these_gold_scores = self.extract_gold_label_scores(list_gold_logits, gold_label_ids.to(self.model.device))
                     all_gold_scores.extend(these_gold_scores)
 
+                    # subword tokens
+                    ignore = [32099, 32098, 0, 1]
+                    for example in gold_label_ids:
+                        gold_label_tok_ids = [x.item() for x in example if x not in ignore]
+                        all_gold_label_tok_ids.append(gold_label_tok_ids)
+                        all_gold_label_toks.append(self.tokenizer.convert_ids_to_tokens(gold_label_tok_ids))
+                    for example in dict_generated_ids['sequences']:
+                        pred_tok_ids = [x.item() for x in example if x not in ignore]
+                        all_pred_tok_ids.append(pred_tok_ids)
+                        all_pred_toks.append(self.tokenizer.convert_ids_to_tokens(pred_tok_ids))
+
+
         assert len(preds) == len(all_labels)
         assert len(preds) == len(all_mask_tags)
         assert len(preds) == len(all_pos_tags)
@@ -340,12 +360,21 @@ class API_T2T:
         assert sum(all_word_numbers) == len(preds)
         assert len(all_pred_scores) == len(all_labels)
         assert len(all_gold_scores) == len(all_labels)
+        assert len(all_gold_label_toks) == len(all_labels)
+        assert len(all_gold_label_tok_ids) == len(all_labels)
+        assert len(all_pred_toks) == len(all_labels)
+        assert len(all_pred_tok_ids) == len(all_labels)
 
         outputs = []
+
         for k in range(len(preds)):
             output = {
                 "prediction": preds[k],
                 "ground_truth": all_labels[k],
+                "ground_truth_tok_ids": all_gold_label_tok_ids[k],
+                "ground_truth_tok": all_gold_label_toks[k],
+                "prediction_tok_ids": all_pred_tok_ids[k],
+                "prediction_tok": all_pred_toks[k],
                 "masking": all_mask_tags[k],
                 "prediction_eval_metrics": {
                     "pred_scores": all_pred_scores[k],

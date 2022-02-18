@@ -4,6 +4,7 @@ from questeval.maskeval import MaskEval
 import torch
 import json
 import numpy as np
+import re
 
 def aggregate(words, metric_name, func=None):
     score = 0
@@ -19,27 +20,26 @@ def aggregate(words, metric_name, func=None):
 
 def predict(model_path, hyp, source):
     maskeval = MaskEval(fill_mask_model_name = model_path,
-                        use_cache=False)
+                        use_cache=False, model_batch_size=256)
     # read hypothesis and reference files
     hyps, refs = [], []
     with open(hyp) as hf, open(source) as sf:
         for sid, (h, s) in enumerate(zip(hf, sf)):
-            hyps.append(h)
-            refs.append(s)
-            if len(hyps) == 5:
-                break
+            hyps.append(re.sub(' +', ' ', h.strip()))
+            refs.append(re.sub(' +', ' ', s.strip()))
+            #if len(hyps) == 5:
+            #    break
 
     # make predictions and get scores (stored in log files)
-    _, logs = maskeval.corpus_questeval(hypothesis=hyps, references=refs)
+    _, logs = maskeval.corpus_questeval(hypothesis=hyps, references=refs, batch_size=4000)
 
     # go through log files and print out all scores for each example
     headers, printed_headers = '', False
     for l, log in enumerate(logs):
         example = []
         print(json.dumps(log))
-
-
         continue
+
         # exact match scores (averaged over all words)
         example.append(round(aggregate(log['masked'], 'exact_match'), 4))
         headers += 'exact'
@@ -60,7 +60,7 @@ def predict(model_path, hyp, source):
                 example.append(agg_func(all_scores))
                 headers += '\tbertscore_' + agg_func.__name__
         # bert-score on whole predicted sequences (i.e. if we take each masked predictions and treat it as a sequence
-        # to beb compared to the other sequence (tested this out)
+        # to be compared to the other sequence (tested this out)
         #for berttype in 'bertscore_hyp_mlmpred', 'bertscore_ref_mlmpred', 'bertscore_ref_hyp':
         #    example.append(log['comparison_metrics'][berttype])
         #    headers += '\t' + berttype

@@ -131,7 +131,7 @@ class MaskEval:
             
 
         result = {'corpus_score': np.average(scores), 'ex_level_scores': scores}
-        return result, logs
+        return result, all_logs
 
     def _batch_questeval(
             self,
@@ -242,9 +242,10 @@ class MaskEval:
         logs: List[Dict],
         hashes: List[str]
     ) -> None:
-        for log, hash in zip(logs, hashes):
-            with open(os.path.join(self.log_dir, hash), 'w',  encoding="utf-8") as outfile:
-                json.dump(log, outfile, indent=2)
+        if self.use_cache:
+            for log, hash in zip(logs, hashes):
+                with open(os.path.join(self.log_dir, hash), 'w',  encoding="utf-8") as outfile:
+                    json.dump(log, outfile, indent=2)
 
     def open_log_from_text(self, hypothesis: str, reference: str) -> Dict:
         id_text = hypothesis + self.sep + reference
