@@ -151,7 +151,7 @@ class MaskEval:
             self._serialize_logs(logs, logs_hashes)
 
         # Compute answer similarity (exact match, BERTScore, etc.)
-        do_answ_sim = True #TO SET TO FALSE
+        do_answ_sim = False
         for log in logs:
             if not log["answ_sim_computed"]:
                 do_answ_sim = True
@@ -178,16 +178,16 @@ class MaskEval:
             #segm-BERTScore
             segm_bertscores = self._segm_bertscore(predictions, gold_labels)
             for k in range(len(log["masked"])):
-                log['masked'][k]['seg_bertscore'] = {}
+                log['masked'][k]["prediction_eval_metrics"]['seg_bertscore'] = {}
                 for typescore in 'precision', 'recall', 'f1':
-                    log['masked'][k]['seg_bertscore'][typescore] = segm_bertscores[typescore][k]
+                    log['masked'][k]["prediction_eval_metrics"]['seg_bertscore'][typescore] = segm_bertscores[typescore][k]
 
             #doc-BERTSCORE
             doc_bertscores = self._doc_berstcore(log)
             for k in range(len(log["masked"])):
-                log['masked'][k]['doc_bertscore'] = {}
+                log['masked'][k]["prediction_eval_metrics"]['doc_bertscore'] = {}
                 for typescore in 'precision', 'recall', 'f1':
-                    log['masked'][k]['doc_bertscore'][typescore] = doc_bertscores[typescore][k]
+                    log['masked'][k]["prediction_eval_metrics"]['doc_bertscore'][typescore] = doc_bertscores[typescore][k]
 
             log["answ_sim_computed"] = True
 
@@ -209,7 +209,7 @@ class MaskEval:
         return scores
     
     def _segm_bertscore(self, predictions, ground_truths):
-        return self._calculate_bertscore(pred_labels, gold_labels)
+        return self._calculate_bertscore(predictions, ground_truths)
 
     def _doc_berstcore(self, log):
         original_texts = []
@@ -226,7 +226,7 @@ class MaskEval:
             new_texts.append(new_text)
 
         hyp_text = log["hyp_text"]
-        original_texts = len(hyp_ground_truth_words) * [hyp_text]
+        original_texts += len(hyp_ground_truth_words) * [hyp_text]
 
         # reference
         ref_ground_truth_words = [m["ground_truth"] for m in log["masked"] if m["masking"] == "ref"]
@@ -239,7 +239,7 @@ class MaskEval:
             new_texts.append(new_text)
 
         ref_text = log["ref_text"]
-        original_texts = len(ref_ground_truth_words) * [hyp_text]
+        original_texts += len(ref_ground_truth_words) * [ref_text]
 
         assert len(original_texts) == len(new_texts)
 
