@@ -52,6 +52,19 @@ def resize(original_list, desired_len, stop_index):
 
     return output
 
+
+def add_label_padding(label_list):
+    lengths = [len(l) for l in label_list]
+    max_len = max(lengths)
+    padded_label_list = []
+
+    for l in label_list:
+        if len(l) < max_len:
+            padded_label_list.append(l + (max_len - len(l)) * [0])
+        else:
+            padded_label_list.append(l)
+    return padded_label_list
+
 class API_T2T:
     def __init__(
         self,
@@ -232,9 +245,10 @@ class API_T2T:
         order = self.order
         input_batch = {
             "input_ids": [],
-            "attention_mask": []
+            "attention_mask": [],
+            "label_ids": []
         }
-        labels = []
+        str_labels = []
         mask_tags = []
         pos_tags = []
         word_numbers = []
@@ -258,21 +272,23 @@ class API_T2T:
                             "hyp_tokens"] + [self.tokenizer_indices["</s>"]]
 
                 attention_mask = len(input_ids) * [1]
-
                 input_ids = resize(input_ids, self.max_seq_length, self.tokenizer_indices["</s>"])
-                attention_mask = resize(attention_mask, self.max_seq_length, 1)
-                label_str = self.tokenizer.decode(mask_dict["label_tokens"], skip_special_tokens=True)
+                attention_mask = resize(attention_mask, self.max_seq_length, self.tokenizer_indices["</s>"])
+                str_label = self.tokenizer.decode(mask_dict["label_tokens"], skip_special_tokens=True)
 
                 input_batch["input_ids"].append(input_ids)
                 input_batch["attention_mask"].append(attention_mask)
+                input_batch["label_ids"].append(mask_dict["label_tokens"])
 
-                labels.append(label_str)
+                str_labels.append(str_label)
                 pos_tags.append(mask_dict["label_pos"])
                 mask_tags.append(mask_dict["masking"])
 
-        label_ids = self.tokenizer(['<pad> <extra_id_0> '+ x + ' <extra_id_1> </s>' for x in labels], padding=True).input_ids
-        input_batch['label_ids'] = label_ids
-        return input_batch, labels, mask_tags, word_numbers, pos_tags
+
+        no_padded_label_ids = input_batch["label_ids"]
+        input_batch["label_ids"] = add_label_padding(input_batch["label_ids"])
+
+        return input_batch, no_padded_label_ids, str_labels, mask_tags, word_numbers, pos_tags
     
     def predict(self, text_pairs: dict):
         # text_pairs should be a list of dict, each dict being of the form:
@@ -288,17 +304,19 @@ class API_T2T:
         all_word_numbers = [] #number each text pairs produced
         all_pred_scores = []
         all_gold_scores = []
+        all_label_ids = []
 
         for i in range(0, len(text_pairs), self.text_pair_batch_size):
 
             batch = text_pairs[i: i+self.text_pair_batch_size]
-            input_batch, labels, mask_tags, word_numbers, pos_tags = self.preprocess_batch(batch)
+            input_batch, no_padded_label_ids, str_labels, mask_tags, word_numbers, pos_tags = self.preprocess_batch(batch)
+            all_label_ids = all_label_ids + no_padded_label_ids
             all_word_numbers = all_word_numbers + word_numbers
-            all_labels = all_labels + labels
+            all_labels = all_labels + str_labels
             all_mask_tags = all_mask_tags + mask_tags
             all_pos_tags = all_pos_tags + pos_tags
 
-            for k in range(0, len(labels), self.model_batch_size):
+            for k in range(0, len(str_labels), self.model_batch_size):
                 with torch.no_grad():
                     input_ids = torch.tensor(input_batch["input_ids"][k: k+self.model_batch_size])
                     attention_mask = torch.tensor(input_batch["attention_mask"][k: k+self.model_batch_size])
@@ -346,6 +364,7 @@ class API_T2T:
             output = {
                 "prediction": preds[k],
                 "ground_truth": all_labels[k],
+                "ground_truth_ids": all_label_ids[k][1:-2], #to not keep extra + eos tokens
                 "masking": all_mask_tags[k],
                 "prediction_eval_metrics": {
                     "pred_scores": all_pred_scores[k],
