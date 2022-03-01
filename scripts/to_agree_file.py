@@ -63,7 +63,11 @@ def main(args):
         try:
             agreed = scores[better][sentno] > scores[worse][sentno]
         except:
-            print(f"No key in {args.agree_file.name} for sentence {sentno} better={better} or worse={worse}", file=sys.stderr)
+            #print('***')
+            #print(scores.keys())
+            #print(scores[better])
+            #print(scores[wordse])
+            #print(f"No key in {args.agree_file.name} for sentence {sentno} better={better} or worse={worse}\n", file=sys.stderr)
             print("ERR")
             sys.exit(0)
         if agreed:
@@ -97,7 +101,7 @@ def main(args):
     # 345 online-G.0 CUNI-Transformer.5560 0 0 0 0 0 0 0 0 0 0 0 0 0
     out = open('out', 'w')
     metric = os.path.basename(args.ourfile)
-    print(f'SID BETTER WORSE {metric}', file=out)
+    print(f'SID BETTER WORSE {metric}', file=sys.stderr)
     d = csv.DictReader(open(args.agree_file), delimiter=' ')
     skipped = 0
     total = 0

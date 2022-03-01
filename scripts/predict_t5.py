@@ -20,7 +20,7 @@ def aggregate(words, metric_name, func=None):
 
 def predict(model_path, hyp, source):
     maskeval = MaskEval(fill_mask_model_name = model_path,
-                        use_cache=False, model_batch_size=256)
+                        use_cache=False, model_batch_size=128)
     # read hypothesis and reference files
     hyps, refs = [], []
     with open(hyp) as hf, open(source) as sf:
