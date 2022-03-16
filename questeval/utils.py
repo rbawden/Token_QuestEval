@@ -320,6 +320,8 @@ class API_T2T:
                         output_scores=True,
                         return_dict_in_generate=True
                     )
+
+                    
                     these_pred_scores = self.extract_pred_label_scores(dict_generated_ids['scores'], dict_generated_ids['sequences'])
                     all_pred_scores.extend(these_pred_scores)
 
@@ -341,8 +343,8 @@ class API_T2T:
                     these_gold_scores = self.extract_gold_label_scores(list_gold_logits, gold_label_ids.to(self.model.device))
                     all_gold_scores.extend(these_gold_scores)
 
-                    #import pdb; pdb.set_trace()
 
+                    #import pdb; pdb.set_trace()
                     # subword tokens
                     ignore = [32099, 32098, 0, 1]
                     for example in gold_label_ids:
@@ -422,7 +424,7 @@ class API_T2T:
             # get gold label indices for each token in example
             idxs = all_idxs[ex_id]
             # select the scores corresponding to the indices of the predicted subwords
-            label_scores = example_scores.gather(-1, idxs.unsqueeze(-1)).squeeze(0)
+            label_scores = example_scores.gather(-1, idxs.unsqueeze(-1)).squeeze(-1)
             # store scores for each token (ignoring padding and special tokens)
             all_label_scores.append([label_scores[s].item() for s in range(len(label_scores)) if idxs[s] not in [0, 1, 32099, 32098]])
 
@@ -444,7 +446,7 @@ class API_T2T:
             example_scores = nn.functional.log_softmax(all_scores[tok_id-1], dim=-1)
             idxs = all_idxs.t()[tok_id]
             # select the scores corresponding to the indices of the predicted subwords
-            label_scores = example_scores.gather(-1, idxs.unsqueeze(0)).squeeze(0)
+            label_scores = example_scores.gather(-1, idxs.unsqueeze(-1)).squeeze(-1)
             # store prediction scores for each predicted subword
             for p in range(label_scores.shape[-1]):
                 # exclude special tokens and padding
