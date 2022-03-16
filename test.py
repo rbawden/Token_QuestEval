@@ -1,16 +1,12 @@
 from questeval.maskeval import MaskEval
 
 def main():
-    questeval = MaskEval(fill_mask_model_name="models/t5_cnn_model/checkpoint-85920")
-    hypothesis = ["I have trouble coming up with characters' names",
-                  "This is a fun-loving copper-coated bear!",
-                  "Our trip to Timor-Leste didn't cost us more than 2,000$.",
-                  "It was snowing heavily today."
+    questeval = MaskEval()
+    hypothesis = ["They didn't make a fun-loving copper-coated bear statue.",
+                  """An American woman died aboard a cruise ship that docked at Rio de Janeiro on Tuesday, the same ship on which 86 passengers previously fell ill, according to the state-run Brazilian news agency, Agencia Brasil. The American tourist died aboard the MS Veendam, owned by cruise operator Holland America. Federal Police told Agencia Brasil that forensic doctors were investigating her death. The ship's doctors told police that the woman was elderly and suffered from diabetes and hypertension, according the agency. The other passengers came down with diarrhea prior to her death during an earlier part of the trip, the ship's doctors said. The Veendam left New York 36 days ago for a South America tour."""
                   ]
-    reference = ["It's difficult for me to name fictional characters",
-                 "I saw a fun_loving bear today, covered with copper!",
-                 "Our trip to Timor-Leste isn't expensive.",
-                 "We had a snowy day."]
+    reference = ["I saw a fun_loving bear today, covered with copper!",
+                 """The elderly woman suffered from diabetes and hypertension, ship's doctors say .\nPreviously, 86 passengers had fallen ill on the ship, Agencia Brasil says ."""]
 
     score = questeval.corpus_questeval(hypothesis=hypothesis, references=reference)
     print(score)
