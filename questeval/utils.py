@@ -323,7 +323,7 @@ class API_T2T:
 
             os.sys.stderr.write(str(i) + ', lentextpairs=' + str(len(text_pairs)) + ', textpairbsz=' + str(self.text_pair_batch_size) + '\n')
             for k in range(0, len(str_labels), self.model_batch_size):
-                os.sys.stderr.write('\tk=' + str(k) + ', lenlabels=' + str(len(labels)) + ', modelbsz=' + str(self.model_batch_size) + '\n')
+                os.sys.stderr.write('\tk=' + str(k) + ', lenlabels=' + str(len(str_labels)) + ', modelbsz=' + str(self.model_batch_size) + '\n')
 
                 with torch.no_grad():
                     input_ids = torch.tensor(input_batch["input_ids"][k: k+self.model_batch_size])
