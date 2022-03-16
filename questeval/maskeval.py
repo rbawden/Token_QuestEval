@@ -66,14 +66,6 @@ class MaskEval:
 
         return model
 
-    def calculate_bertscore(self, preds, refs, lang='en'):
-        assert lang in ['en', 'multilingual']
-        if lang == 'en':
-            scores = self.bertscore._compute(preds, refs, model_type='bert-base-uncased')
-        else:
-            scores = self.bertscore._compute(preds, refs, model_type='bert-base-multilingual-cased')
-        return scores
-
     def truncate(self, text_pairs):
         truncated_text_pairs = []
         t5_tokenizer = self.truncate_tokenizer
@@ -159,7 +151,7 @@ class MaskEval:
             self._serialize_logs(logs, logs_hashes)
 
         # Compute answer similarity (exact match, BERTScore, etc.)
-        do_answ_sim = True #TO SET TO FALSE
+        do_answ_sim = False
         for log in logs:
             if not log["answ_sim_computed"]:
                 do_answ_sim = True
@@ -169,42 +161,90 @@ class MaskEval:
             self._compute_answer_similarity(logs)
             self._serialize_logs(logs, logs_hashes)
 
-        # Calculate BERTscores between predicted labels and gold labels
-        for k in range(len(logs)):
-            pred_seq = ''
-            pred_labels = [logs[k]['masked'][w]['prediction'] for w in range(len(logs[k]['masked']))]
-            gold_labels = [logs[k]['masked'][w]['ground_truth'] for w in range(len(logs[k]['masked']))]
-            bertscores = self.calculate_bertscore(pred_labels, gold_labels)
-
-            for w in range(len(logs[k]['masked'])):
-                logs[k]['masked'][w]['bert_scores'] = {}
-                for typescore in 'precision', 'recall', 'f1':
-                    logs[k]['masked'][w]['bert_scores'][typescore] = bertscores[typescore][w]
-
-                #pred_seq += ' ' + logs[k]['masked'][w]['prediction']
-            # calculate BERTscore between concat of pred labels and original sequence
-            #logs[k]['prediction_eval_metrics']['bertscore_ref_mlmpred'] = self.calculate_bertscore(pred_seq.strip(), logs[k]['ref_text'])
-            #logs[k]['prediction_eval_metrics']['bertscore_ref_hyp'] = self.calculate_bertscore(logs[k]['hyp_text'], logs[k]['ref_text'])
-            #logs[k]['prediction_eval_metrics']['bertscore_hyp_mlmpred'] = self.calculate_bertscore(pred_seq.strip(), logs[k]['hyp_text'])
-        
         # Calculate Score
         scores = self._calculate_score_from_logs(logs)
         return scores, logs
 
-    def _exact_match(self, prediction, ground_truth):
-        if prediction.lower() == ground_truth.lower():
-            return 1
-        else:
-            return 0
-
-    def _pred_score(self, prediction):
-        1
-
     def _compute_answer_similarity(self, logs):
         for log in logs:
-            for l in log["masked"]:
-                l["prediction_eval_metrics"]["exact_match"] = self._exact_match(prediction = l["prediction"], ground_truth = l["ground_truth"])
+            predictions = [log['masked'][w]['prediction'] for w in range(len(log['masked']))]
+            gold_labels = [log['masked'][w]['ground_truth'] for w in range(len(log['masked']))]
+
+            #exact match
+            em_scores = self._exact_match(predictions, gold_labels)
+            for k in range(len(log["masked"])):
+                log["masked"][k]["prediction_eval_metrics"]["exact_match"] = em_scores[k]
+
+            #segm-BERTScore
+            segm_bertscores = self._segm_bertscore(predictions, gold_labels)
+            for k in range(len(log["masked"])):
+                log['masked'][k]["prediction_eval_metrics"]['seg_bertscore'] = {}
+                for typescore in 'precision', 'recall', 'f1':
+                    log['masked'][k]["prediction_eval_metrics"]['seg_bertscore'][typescore] = segm_bertscores[typescore][k]
+
+            #doc-BERTSCORE
+            doc_bertscores = self._doc_berstcore(log)
+            for k in range(len(log["masked"])):
+                log['masked'][k]["prediction_eval_metrics"]['doc_bertscore'] = {}
+                for typescore in 'precision', 'recall', 'f1':
+                    log['masked'][k]["prediction_eval_metrics"]['doc_bertscore'][typescore] = doc_bertscores[typescore][k]
+
             log["answ_sim_computed"] = True
+
+    def _calculate_bertscore(self, candidates, references, lang='en'):
+        assert lang in ['en', 'multilingual']
+        if lang == 'en':
+            scores = self.bertscore._compute(candidates, references, model_type='bert-base-uncased')
+        else:
+            scores = self.bertscore._compute(candidates, references, model_type='bert-base-multilingual-cased')
+        return scores
+
+    def _exact_match(self, predictions, ground_truths):
+        scores = []
+        for (p, g) in zip(predictions, ground_truths):
+            if p.lower() == g.lower():
+                scores.append(1)
+            else:
+                scores.append(0)
+        return scores
+    
+    def _segm_bertscore(self, predictions, ground_truths):
+        return self._calculate_bertscore(predictions, ground_truths)
+
+    def _doc_berstcore(self, log):
+        original_texts = []
+        new_texts = []
+
+        #hypothesis
+        hyp_ground_truth_words = [m["ground_truth"] for m in log["masked"] if m["masking"] == "hyp"]
+        hyp_predicted_words = [m["prediction"] for m in log["masked"] if m["masking"] == "hyp"]
+        for i in range(len(hyp_predicted_words)):
+            #construct new sequence with the ground truth word replaced by the prediction
+            new_seq = hyp_ground_truth_words.copy()
+            new_seq[i] = hyp_predicted_words[i]
+            new_text = ' '.join(new_seq)
+            new_texts.append(new_text)
+
+        hyp_text = log["hyp_text"]
+        original_texts += len(hyp_ground_truth_words) * [hyp_text]
+
+        # reference
+        ref_ground_truth_words = [m["ground_truth"] for m in log["masked"] if m["masking"] == "ref"]
+        ref_predicted_words = [m["prediction"] for m in log["masked"] if m["masking"] == "ref"]
+        for i in range(len(ref_predicted_words)):
+            # construct new sequence with the ground truth word replaced by the prediction
+            new_seq = ref_ground_truth_words.copy()
+            new_seq[i] = ref_predicted_words[i]
+            new_text = ' '.join(new_seq)
+            new_texts.append(new_text)
+
+        ref_text = log["ref_text"]
+        original_texts += len(ref_ground_truth_words) * [ref_text]
+
+        assert len(original_texts) == len(new_texts)
+
+        return self._calculate_bertscore(new_texts, original_texts)
+
 
     def _calculate_score_from_logs(self, logs):
         scores = []
