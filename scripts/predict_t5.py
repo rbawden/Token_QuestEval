@@ -30,6 +30,9 @@ def predict(model_path, hyp, source):
             #if len(hyps) == 5:
             #    break
 
+    refs = ["“Whether NIRB had any powers with regard to this matter, the net effect is to give the impression that it puts pressure on NIRB with respect to its responsibilities and saying ‘yes’ to the proposal."]
+    hyps = ["“Whether NIRB had any powers with regard to this matter, the net effect is to give the impression that it puts pressure on NIRB with respect to its responsibilities and saying ‘yes’ to the proposal.""if the Nunavut Impact Review Board had the authority to do so, the final effect would be to put more pressure on the Nunavut Impact Review Board to be responsible and to approve the proposal."]
+            
     # make predictions and get scores (stored in log files)
     _, logs = maskeval.corpus_questeval(hypothesis=hyps, references=refs, batch_size=4000)
 
