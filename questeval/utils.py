@@ -374,7 +374,8 @@ class API_T2T:
                         pred_tok_ids = [x.item() for x in example if x not in ignore]
                         all_pred_tok_ids.append(pred_tok_ids)
                         all_pred_toks.append(self.tokenizer.convert_ids_to_tokens(pred_tok_ids))
-
+                        
+                    import pdb; pdb.set_trace()
 
         assert len(preds) == len(all_labels)
         assert len(preds) == len(all_mask_tags)
