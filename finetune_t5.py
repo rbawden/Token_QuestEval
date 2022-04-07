@@ -25,7 +25,7 @@ def print_memory():
     logging.info('Memory: %s reserved, %s allocated, %s free', r, a, f)
 
 
-def train(data_filename, output_dir, nepochs=1, bsz=8, evalsteps=5000, savesteps=5000, sliding_window_size = 24, order = "hyp_first"):
+def train(data_filename, output_dir, nepochs=1, bsz=8, evalsteps=2500, savesteps=2500, sliding_window_size = 24, order = "hyp_first"):
     logging.basicConfig(level=logging.INFO)
     transformers_logger = logging.getLogger("transformers")
     transformers_logger.setLevel(logging.WARNING)
@@ -42,16 +42,13 @@ def train(data_filename, output_dir, nepochs=1, bsz=8, evalsteps=5000, savesteps
     model_args.save_steps = savesteps
     model_args.no_cache = False
     model_args.reprocess_input_data = False
-    model_args.silent = True
+    model_args.silent = False
     model_args.output_dir = output_dir  # "train_t5MT_outputs/"
     model_args.special_tokens_list = ['<mask>', '<sep>', '<unanswerable>']
     model_args.overwrite_output_dir = True
 
-    # amount of validation data
-    valsize = 2000
-
     # define the model or get last checkpoint (if eval has been done)
-    filename = 't5-base'
+    filename = 'google/mt5-base'
     training_progress_file = ''
     eval_results_file = ''
     prev_checkpoints = glob.glob(model_args.output_dir + '/checkpoint-*')
@@ -67,7 +64,7 @@ def train(data_filename, output_dir, nepochs=1, bsz=8, evalsteps=5000, savesteps
             filename = model_args.output_dir + '/checkpoint-' + str(num)
             training_progress_file = model_args.output_dir + '/training_progress_scores.csv'
             eval_results_file = model_args.output_dir + '/eval_results.txt'
-    model = T5Model("t5", filename, args=model_args, sliding_window_size = sliding_window_size, order = order)
+    model = T5Model("mt5", filename, args=model_args, sliding_window_size = sliding_window_size, order = order)
 
     print_memory()
 
@@ -75,6 +72,7 @@ def train(data_filename, output_dir, nepochs=1, bsz=8, evalsteps=5000, savesteps
     os.sys.stderr.write('>> Fine-tuning with ' + data_filename + '\n')
     all_data = load_jsonl(data_filename)
     random.shuffle(all_data)
+    valsize = int(len(all_data) * 0.1)
     train_data = all_data[:-valsize]
     eval_data = all_data[-valsize:]
 
