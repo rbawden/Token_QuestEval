@@ -44,7 +44,7 @@ for lang in SPACY_PIPELINE_NAMES:
     SPACY_PIPELINES[lang] = pipeline
 
 SPACY_PIPELINES["id"] = Indonesian()
-SPACY_PIPELINES["tr"] = Turkish()
+SPACY_PIPELINES["tu"] = Turkish()
 
 def preprocess_batch_for_hf_dataset(dataset, tokenizer, args):
     if args.preprocess_inputs:
@@ -318,7 +318,7 @@ def preprocess_data(data):
                                                                 args=args)
 
         input_ids = ref_tokens[:-1] + [args.tokenizer_indices["<sep>"]] + hyp_tokens[:-1] + [args.tokenizer_indices["</s>"]]
-    else:  # order = focus hyp_first
+    else:  # order = focus_first
         if random.randint(0, 1) == 0:
             focus_tokens, context_tokens, label = get_masked_sequence(focus=example['hypothesis'],
                                                                       context=example['reference'],
@@ -355,10 +355,10 @@ class T5Dataset(Dataset):
 
         # get the indices for special tokens
         args.tokenizer_indices = {
-            "<extra_id_0>": tokenizer.convert_tokens_to_ids("<extra_id_0>"),
-            "<extra_id_1>": tokenizer.convert_tokens_to_ids("<extra_id_1>"),
-            "<sep>": tokenizer.convert_tokens_to_ids("<sep>"),
-            "</s>": tokenizer.convert_tokens_to_ids("</s>")
+            "<extra_id_0>": tokenizer.encode("<extra_id_0>")[0],
+            "<extra_id_1>": tokenizer.encode("<extra_id_1>")[0],
+            "<sep>": tokenizer.encode("<sep>")[0],
+            "</s>": tokenizer.encode("</s>")[0]
         }
 
         if os.path.exists(cached_features_file) and (
@@ -372,7 +372,7 @@ class T5Dataset(Dataset):
         else:
             logger.info(" Creating features from dataset file at %s", args.cache_dir)
             logger.info(" To be output to %s", cached_features_file)
-
+		
             data = [(example, tokenizer, args) for example in data]
 
             self.examples = [preprocess_data(d) for d in tqdm(data)]

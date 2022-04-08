@@ -40,7 +40,7 @@ for lang in SPACY_PIPELINE_NAMES:
     SPACY_PIPELINES[lang] = pipeline
 
 SPACY_PIPELINES["id"] = Indonesian()
-SPACY_PIPELINES["tr"] = Turkish()
+SPACY_PIPELINES["tu"] = Turkish()
 
 
 def resize(original_list, desired_len, stop_index):
@@ -102,12 +102,15 @@ class API_T2T:
             self.model.cuda()
 
         self.order = order
+        
+        # get the indices for special tokens
         self.tokenizer_indices = {
-            "<extra_id_0>": self.tokenizer.convert_tokens_to_ids("<extra_id_0>"),
-            "<extra_id_1>": self.tokenizer.convert_tokens_to_ids("<extra_id_1>"),
-            "<sep>": self.tokenizer.convert_tokens_to_ids("<sep>"),
-            "</s>": self.tokenizer.convert_tokens_to_ids("</s>")
+            "<extra_id_0>": self.tokenizer.encode("<extra_id_0>")[0],
+            "<extra_id_1>": self.tokenizer.encode("<extra_id_1>")[0],
+            "<sep>": self.tokenizer.encode("<sep>")[0],
+            "</s>": self.tokenizer.encode("</s>")[0]
         }
+
 
         #self.loss_fct = nn.NLLLoss(reduction='none', ignore_index=self.model.config.pad_token_id)
         #self.lsm = nn.LogSoftmax(dim=1)
@@ -340,8 +343,8 @@ class API_T2T:
                         return_dict_in_generate=True
                     )
 
-                    
-                    these_pred_scores = self.extract_pred_label_scores(dict_generated_ids['scores'], dict_generated_ids['sequences'])
+                    these_pred_scores = self.extract_scores(dict_generated_ids["sequences"][:,1:], #get rid of first pad token
+                                                            dict_generated_ids['scores'])
                     all_pred_scores.extend(these_pred_scores)
 
                     #import pdb; pdb.set_trace()
@@ -358,8 +361,7 @@ class API_T2T:
                     gold_logits = self.model(input_ids=input_ids.to(self.model.device),
                                              labels=gold_label_ids.to(self.model.device),
                                              attention_mask=attention_mask.to(self.model.device)).logits
-                    list_gold_logits = [gold_logits[x] for x in range(gold_logits.shape[0])]
-                    these_gold_scores = self.extract_gold_label_scores(list_gold_logits, gold_label_ids.to(self.model.device))
+                    these_gold_scores = self.extract_scores(gold_label_ids.to(self.model.device), self.reformat_gold_scores(gold_logits))
                     all_gold_scores.extend(these_gold_scores)
 
 
@@ -431,46 +433,32 @@ class API_T2T:
 
         return categorized_outputs
 
-    def extract_gold_label_scores(self, all_scores, all_idxs):
+    def reformat_gold_scores(self, gold_logits):
         '''
-        all_scores: list of n tensors (k,v)
-                        where n=num examples, k=number of toks, v=vocab size
-        all_idxs: (n, k) tensor 
+               transform gold logits into a list of k tensors (n, v)
+                               where n=num examples, k=number of toks, v=vocab size
         '''
-        all_label_scores = []
-        # go through all examples (one list per example)
-        for ex_id in range(len(all_scores)):
-            # get softmax scores for each token in example
-            example_scores = nn.functional.log_softmax(all_scores[ex_id], dim=-1)
-            # get gold label indices for each token in example
-            idxs = all_idxs[ex_id]
-            # select the scores corresponding to the indices of the predicted subwords
-            label_scores = example_scores.gather(-1, idxs.unsqueeze(-1)).squeeze(-1)
-            # store scores for each token (ignoring padding and special tokens)
-            all_label_scores.append([label_scores[s].item() for s in range(len(label_scores)) if idxs[s] not in [0, 1, 32099, 32098]])
+        list_gold_logits = [gold_logits[x] for x in range(gold_logits.shape[0])]
+        length = list_gold_logits[0].shape[0]
 
-        return all_label_scores
+        reshaped_list = [[] for i in range(length)]
 
-    def extract_pred_label_scores(self, all_scores, all_idxs):
-        '''
-        all_scores: list of k tensors (n, v)
-                        where n=num examples, k=number of toks, v=vocab size
-        all_idxs: (n, k) tensor
-        '''
-        # prediction scores (start from index 2 each time)
-        all_label_scores = [[] for i in range(len(all_idxs))]
-        # go through from 0 to max length of predictions 
-        # (ignore first 2, which are always the same). 
-        # Also, the scores do not contain scores for the first index, so use i-1 for indexing
-        for tok_id in range(2, len(all_scores)):
-            # softmax scores first
-            example_scores = nn.functional.log_softmax(all_scores[tok_id-1], dim=-1)
-            idxs = all_idxs.t()[tok_id]
-            # select the scores corresponding to the indices of the predicted subwords
-            label_scores = example_scores.gather(-1, idxs.unsqueeze(-1)).squeeze(-1)
-            # store prediction scores for each predicted subword
+        for gold_logit in list_gold_logits:
+            for i in range(length):
+                reshaped_list[i].append(gold_logit[i])
+
+        reformatted_gold_scores = [torch.stack(l) for l in reshaped_list]
+        return reformatted_gold_scores
+
+    def extract_scores(self, all_idxs, all_scores):
+        output_scores = [[] for i in range(len(all_idxs))]
+        for TOKEN_ID in range(len(all_scores)):
+            example_scores = nn.functional.log_softmax(all_scores[TOKEN_ID], dim=-1)
+            idxs = all_idxs.t()[TOKEN_ID]
+            label_scores = example_scores.gather(-1, idxs.unsqueeze(0)).squeeze(0)
             for p in range(label_scores.shape[-1]):
-                # exclude special tokens and padding
-                if idxs[p].item() not in [0, 1, 32099, 32098]:
-                    all_label_scores[p].append(label_scores[p].item())
-        return all_label_scores
+                # exclude mask tokens and padding
+                if idxs[p].item() not in [0, self.tokenizer_indices["<extra_id_0>"], self.tokenizer_indices["<extra_id_1>"]]:
+                    output_scores[p].append(label_scores[p].item())
+
+        return output_scores
